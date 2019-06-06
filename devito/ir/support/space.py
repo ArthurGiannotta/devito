@@ -10,7 +10,7 @@ from cached_property import cached_property
 from frozendict import frozendict
 
 from devito.tools import PartialOrderTuple, as_tuple, filter_ordered, toposort, is_integer
-from devito.types.dimension import TimeDimension
+
 
 __all__ = ['NullInterval', 'Interval', 'IntervalGroup', 'IterationSpace', 'DataSpace',
            'Forward', 'Backward', 'Any']
