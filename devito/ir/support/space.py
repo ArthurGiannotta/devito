@@ -1,4 +1,7 @@
 import abc
+import sympy
+
+
 from collections import OrderedDict
 from functools import reduce
 from operator import mul
@@ -7,7 +10,7 @@ from cached_property import cached_property
 from frozendict import frozendict
 
 from devito.tools import PartialOrderTuple, as_tuple, filter_ordered, toposort, is_integer
-
+from devito.types.dimension import TimeDimension
 
 __all__ = ['NullInterval', 'Interval', 'IntervalGroup', 'IterationSpace', 'DataSpace',
            'Forward', 'Backward', 'Any']
@@ -121,8 +124,8 @@ class Interval(AbstractInterval):
     is_Defined = True
 
     def __init__(self, dim, lower, upper):
-        assert is_integer(lower)
-        assert is_integer(upper)
+        assert (is_integer(lower) or isinstance(lower, sympy.mul.Mul))
+        assert (is_integer(upper) or isinstance(lower, sympy.mul.Mul))
         super(Interval, self).__init__(dim)
         self.lower = lower
         self.upper = upper

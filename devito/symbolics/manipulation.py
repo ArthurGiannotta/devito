@@ -208,7 +208,7 @@ def pow_to_mul(expr):
 
 def as_symbol(expr):
     """Cast to sympy.Symbol."""
-    from devito.types import Dimension
+    from devito.types import Dimension, TimeDimension
     try:
         if expr.is_Symbol:
             return expr
@@ -222,6 +222,8 @@ def as_symbol(expr):
         return Symbol(expr)
     elif isinstance(expr, Dimension):
         return Symbol(expr.name)
+    elif isinstance(expr, sympy.Mul):
+        return Symbol("time")
     elif expr.is_Symbol:
         return expr
     elif isinstance(expr, Indexed):

@@ -225,7 +225,7 @@ class IterationFold(Iteration):
     of the sequence but the so called ``root`` are "hidden"; that is, they cannot
     be visited by an Iteration/Expression tree visitor.
 
-    The Iterations in the sequence represented by the IterationFold all have same
+    All the Iterations in the sequence represented by the IterationFold have same
     dimension and properties. However, their extent is relative to that of the
     ``root``.
     """
@@ -295,7 +295,7 @@ class BlockDimension(IncrDimension):
             if value <= args[self.root.max_name] - args[self.root.min_name] + 1:
                 return {self.step.name: value}
             elif value < 0:
-                raise ValueError("Illegale block size `%s=%d` (it should be > 0)"
+                raise ValueError("Illegal block size `%s=%d` (it should be > 0)"
                                  % (self.step.name, value))
             else:
                 # Avoid OOB
