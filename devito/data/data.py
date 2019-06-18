@@ -222,18 +222,25 @@ class Data(np.ndarray):
                 for k in j:
                     this_rank.append(slice(0, k, 1))
                 rank_slice.append(this_rank)
+            # Normalize the slices:
+            for i in range(1, len(rank_slice)):
+                if any([j.stop == j.start for j in rank_slice[i]]):
+                    continue
+                rank_coords = self._distributor.all_coords[j]
             # we know how to modify the slices from using m_rank_mat:
             #rank_slice = rank_slice
+            from IPython import embed; embed()
 
-            owner_map = np.zeros(global_size, dtype=np.int32)
-            it2 = np.nditer(m_rank_mat, flags=['refs_ok', 'multi_index'])
-            while not it2.finished:
-                index = it.multi_index
-                if m_rank_mat[index].mask:
-                    pass
-                else:
-                    owner_map[rank_slice[some index]] = m_rank_mat[index]
+            #owner_map = np.zeros(global_size, dtype=np.int32)
+            #it2 = np.nditer(m_rank_mat, flags=['refs_ok', 'multi_index'])
+            #while not it2.finished:
+                #index = it.multi_index
+                #if m_rank_mat[index].mask:
+                    #pass
+                #else:
+                    #owner_map[rank_slice[some index]] = m_rank_mat[index]
             #from IPython import embed; embed()
+            
 
             rank_comm = rank_mat[as_tuple(transform)].reshape(nprocs)
             send_rank = np.where(rank_comm == self._distributor.myrank)[0][0]
