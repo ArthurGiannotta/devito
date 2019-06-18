@@ -162,11 +162,28 @@ class Data(np.ndarray):
         if ADVANCED_SLICING:
             # Data slicing with a negative step and therefore need to transfer data
             # between ranks
+            
+            blah_slice = []
+            for i in loc_idx:
+                if isinstance(i, slice) and i.step < 0:
+                    if i.stop is None:
+                        blah_slice.append(slice(0, i.start+1, -i.step))
+                    else:
+                        blah_slice.append(slice(i.stop+1, i.start+1, -i.step))
+                else:
+                    blah_slice.append(i)
+            blah_slice = as_tuple(blah_slice)
+
             self._index_stash = glb_idx
-            local_val = super(Data, self).__getitem__(loc_idx)
+            #local_val = super(Data, self).__getitem__(loc_idx)
+            local_val = super(Data, self).__getitem__(blah_slice)
             self._index_stash = None
+
+            #from IPython import embed; embed()
+
             # NOTE: Here we may wan't to check if val is empty and remove
             # ranks with an empty val from rank mat?
+            rank = self._distributor.myrank
             comm = self._distributor.comm
             nprocs = self._distributor.nprocs
             topology = self._distributor.topology
@@ -186,6 +203,7 @@ class Data(np.ndarray):
                 else:
                     transform.append(i)
             transform = as_tuple(transform)
+            #local_val.data[:] = local_val.data[transform]
             m_rank_mat = np.ma.masked_array(rank_mat, mask=mask.reshape(topology))
             m_rank_mat[None, ~m_rank_mat.mask] = m_rank_mat[None, ~m_rank_mat.mask][transform]
             m_rank_mat_t = m_rank_mat.reshape(nprocs)
@@ -213,7 +231,7 @@ class Data(np.ndarray):
                 index = it.multi_index
                 tups[index] = index
                 it.iternext()
-            koekf = tups[transform]
+            global_si = tups[transform]
 
             # create the 'rank' slices
             rank_slice = []
@@ -223,13 +241,90 @@ class Data(np.ndarray):
                     this_rank.append(slice(0, k, 1))
                 rank_slice.append(this_rank)
             # Normalize the slices:
-            for i in range(1, len(rank_slice)):
+            # FIXME: USe zip
+            rank_coords = self._distributor.all_coords
+            n_rank_slice = []
+            for i in range(0, len(rank_slice)):
                 if any([j.stop == j.start for j in rank_slice[i]]):
+                    n_rank_slice.append(as_tuple([None]*len(rank_slice[i])))
                     continue
-                rank_coords = self._distributor.all_coords[j]
+                if i == 0:
+                    n_rank_slice.append(as_tuple(rank_slice[i]))
+                    continue
+                n_slice = []
+                for j1, j2, k1, k2 in zip(rank_slice[i], n_rank_slice[i-1], rank_coords[i], rank_coords[i-1]):
+                    shift = k1 - k2
+                    if shift == 1 and j2 is not None:
+                        start = j2.stop
+                        stop = start + j1.stop
+                        n_slice.append(slice(start, stop, 1))
+                    elif shift == 0 or j2 is None:
+                        n_slice.append(j1)
+                    else:
+                        ValueError("Unexpected rank shift")
+                n_rank_slice.append(as_tuple(n_slice))
+            n_rank_slice = as_tuple(n_rank_slice)
+            
             # we know how to modify the slices from using m_rank_mat:
             #rank_slice = rank_slice
-            from IPython import embed; embed()
+            # Now fill each elements owner:
+            owners = np.zeros(global_si.shape, dtype=np.int32)
+            for i in range(len(n_rank_slice)):
+                if any([j == None for j in n_rank_slice[i]]):
+                    continue
+                else:
+                    owners[n_rank_slice[i]] = i
+            send = owners[transform]
+
+            # local_indices
+            local_si = np.zeros(global_size, dtype=tuple)
+            ita =  np.nditer(local_si, flags=['refs_ok', 'multi_index'])
+            while not ita.finished:
+                index = ita.multi_index
+                owner = owners[index]
+                my_slice = n_rank_slice[owner]
+                #my_shift = []
+                rnorm_index = []
+                for j, k in zip(my_slice, index):
+                    rnorm_index.append(k-j.start)
+                local_si[index] = as_tuple(rnorm_index)
+                ita.iternext()
+
+            # copy then overwrite?
+            # FIXME: Needs to be type Data
+            retval = np.array(np.zeros(local_val.shape, dtype=local_val.dtype))
+            #retval = np.copy(local_val[:])
+            retval[:] = 0
+            it2 =  np.nditer(owners, flags=['refs_ok', 'multi_index'])
+            while not it2.finished:
+                index = it2.multi_index
+                if rank == owners[index] and rank == send[index]:
+                    #loc_ind = retval._convert_index(index)
+                    #send_ind = retval._convert_index(global_si[index])
+                    # we have 'global_si' and 'local_si' and 'index'
+                    loc_ind = local_si[index]
+                    send_ind = local_si[global_si[index]]
+                    retval[send_ind] = local_val.data[loc_ind]
+                elif rank == owners[index]:
+                    #loc_ind = retval._convert_index(index)
+                    loc_ind = local_si[index]
+                    send_rank = send[index]
+                    send_ind = global_si[index]
+                    send_val = local_val.data[loc_ind]
+                    #print(loc_ind)
+                    #print([send_ind, send_val])
+                    reqs = comm.isend([send_ind, send_val], dest=send_rank)
+                    reqs.wait()
+                elif rank == send[index]:
+                    recval = comm.irecv(source=owners[index])
+                    local_dat = recval.wait()
+                    loc_ind = local_si[local_dat[0]]
+                    #print(loc_ind)
+                    retval[loc_ind] = local_dat[1]
+                else:
+                    pass
+                it2.iternext()
+            #from IPython import embed; embed()
 
             #owner_map = np.zeros(global_size, dtype=np.int32)
             #it2 = np.nditer(m_rank_mat, flags=['refs_ok', 'multi_index'])
@@ -242,22 +337,22 @@ class Data(np.ndarray):
             #from IPython import embed; embed()
             
 
-            rank_comm = rank_mat[as_tuple(transform)].reshape(nprocs)
-            send_rank = np.where(rank_comm == self._distributor.myrank)[0][0]
+            #rank_comm = rank_mat[as_tuple(transform)].reshape(nprocs)
+            #send_rank = np.where(rank_comm == self._distributor.myrank)[0][0]
 
-            self._index_stash = glb_idx
-            reqs = comm.isend(super(Data, self).__getitem__(loc_idx), dest=send_rank)
-            reqs.wait()
-            recval = comm.irecv(source=rank_comm[self._distributor.myrank])
-            retval = recval.wait()
-            self._index_stash = None
+            #self._index_stash = glb_idx
+            #reqs = comm.isend(super(Data, self).__getitem__(loc_idx), dest=send_rank)
+            #reqs.wait()
+            #recval = comm.irecv(source=rank_comm[self._distributor.myrank])
+            #retval = recval.wait()
+            #self._index_stash = None
 
             # FIXME: Horrid, broken...
-            retval._index_stash = self._index_stash
-            retval._modulo = self._modulo
-            retval._decomposition = self._decomposition
-            retval._distributor = self._distributor
-            retval._is_distributed = self._is_distributed
+            #retval._index_stash = self._index_stash
+            #retval._modulo = self._modulo
+            #retval._decomposition = self._decomposition
+            #retval._distributor = self._distributor
+            #retval._is_distributed = self._is_distributed
             return retval
         elif loc_idx is NONLOCAL:
             # Caller expects a scalar. However, `glb_idx` doesn't belong to
