@@ -1,4 +1,5 @@
 from collections import Iterable
+from functools import wraps
 
 import numpy as np
 
@@ -141,8 +142,17 @@ class Data(np.ndarray):
     def check_slicing(func):
         @wraps(func)
         def wrapper(data, *args, **kwargs):
-
-            kwargs['mpi_slicing'] = 
+            glb_idx = args[0]
+            if data._is_mpi_distributed:
+                for i in as_tuple(glb_idx):
+                    if isinstance(i, slice) and i.step is not None and i.step < 0:
+                        mpi_slicing = True
+                        break
+                    else:
+                        mpi_slicing = False
+            else:
+                mpi_slicing = False
+            kwargs['mpi_slicing'] = mpi_slicing
             return func(data, *args, **kwargs)
         return wrapper
 
@@ -156,85 +166,68 @@ class Data(np.ndarray):
     @check_slicing
     def __getitem__(self, glb_idx, mpi_slicing=False):
         loc_idx = self._convert_index(glb_idx)
-
-        ## FIXME: Change this horrible code to a tag:
-        #if self._is_mpi_distributed:
-            #for i in as_tuple(loc_idx):
-                #if isinstance(i, slice) and i.step is not None and i.step < 0:
-                    #ADVANCED_SLICING = True
-                    #break
-                #else:
-                    #ADVANCED_SLICING = False
-        #else:
-            #ADVANCED_SLICING = False
-
         if mpi_slicing:
-            # Data slicing with a negative step and therefore need to transfer data
-            # between ranks
-            
-            blah_slice = []
-            for i in loc_idx:
-                if isinstance(i, slice) and i.step < 0:
+            # Retrieve the pertinent local data prior to mpi send/receive operations
+            loc_data_idx = []
+            for i in as_tuple(loc_idx):
+                if isinstance(i, slice) and i.step is not None and i.step < 0:
                     if i.stop is None:
-                        blah_slice.append(slice(0, i.start+1, -i.step))
+                        loc_data_idx.append(slice(0, i.start+1, -i.step))
                     else:
-                        blah_slice.append(slice(i.stop+1, i.start+1, -i.step))
+                        loc_data_idx.append(slice(i.stop+1, i.start+1, -i.step))
                 else:
-                    blah_slice.append(i)
-            blah_slice = as_tuple(blah_slice)
+                    loc_data_idx.append(i)
+            loc_data_idx = as_tuple(loc_data_idx)
 
             self._index_stash = glb_idx
-            #local_val = super(Data, self).__getitem__(loc_idx)
-            # FIXME: Local val currently returning the wrong decompositin
-            local_val = super(Data, self).__getitem__(blah_slice)
+            # FIXME: local_val currently returning the wrong decompositin (general problem)
+            local_val = super(Data, self).__getitem__(loc_data_idx)
             self._index_stash = None
 
-            #from IPython import embed; embed()
-
-            # NOTE: Here we may wan't to check if val is empty and remove
-            # ranks with an empty val from rank mat?
             rank = self._distributor.myrank
             comm = self._distributor.comm
             nprocs = self._distributor.nprocs
             topology = self._distributor.topology
-            # Produce the rank matrix
+            # Produce the 'rank' matrix
             rank_mat = np.arange(nprocs).reshape(topology)
-            # Gather dat structs to see which elements matter
+            # Gather data structures from all ranks in order to produce the
+            # relevant mappings. Mask ranks with no data.
             dat_struct = []
             mask = np.zeros(nprocs, dtype=np.int32)
             for j in range(nprocs):
                     dat_struct.append(comm.bcast(local_val.shape, root=j))
                     if any(k == 0 for k in dat_struct[j]):
                         mask[j] = 1
-            transform = []
-            for i in as_tuple(loc_idx):
-                if isinstance(i, slice):
-                    transform.append(slice(None, None, np.sign(i.step)))
-                else:
-                    transform.append(i)
-            transform = as_tuple(transform)
-            #local_val.data[:] = local_val.data[transform]
+            # This 'transform' will be required to produce the required maps
+            # NOTE: Doudble check the 'else 0' is robust.
+            transform = as_tuple([slice(None, None, np.sign(i.step)) if isinstance(i, slice)
+                                  else 0 for i in as_tuple(loc_idx)])
+            # Maksed rank matrices
             m_rank_mat = np.ma.masked_array(rank_mat, mask=mask.reshape(topology))
             m_rank_mat[None, ~m_rank_mat.mask] = m_rank_mat[None, ~m_rank_mat.mask][transform]
             m_rank_mat_t = m_rank_mat.reshape(nprocs)
-            ## can we send the data now?
-            #for j in range(len(m_rank_mat_t)):
-                #if not m_rank_mat_t.mask[j]:
-                    #send_from = m_rank_mat_t[j]
-                    ## shape needed = dat_struct[j]
-                    ## form the required slices:
-                    #send_slice = []
-                    #for k in dat_struct[j]:
-                        #send_slice.append(slice(0, k, 1))
-                    #send_slice = as_tuple(send_slice)
 
-                    #send_data = local_val[send_slice]
-
-            dims = len(rank_mat.shape)
+            # FIXME: Better ways of doing this
             global_size = []
-            for i in glb_idx:
-                global_size.append(abs(i.start-i.stop))
+            for i, j in zip(glb_idx, self._distributor._glb_shape):
+                if isinstance(i, slice):
+                    if i.start is None and i.step is not None and i.step < 0:
+                        start = j-1
+                    elif i.start is None:
+                        start = 0
+                    else:
+                        start = i.start
+                    if i.stop is None and i.step is not None and i.step < 0:
+                        stop = -1
+                    elif i.stop is None:
+                        stop = j
+                    else:
+                        stop = i.stop
+                    global_size.append(abs(start-stop))
+                else:
+                    global_size.append(1)
             global_size = as_tuple(global_size)
+
             tups = np.zeros(global_size, dtype=tuple)
             it =  np.nditer(tups, flags=['refs_ok', 'multi_index'])
             while not it.finished:
@@ -276,7 +269,6 @@ class Data(np.ndarray):
             n_rank_slice = as_tuple(n_rank_slice)
             
             # we know how to modify the slices from using m_rank_mat:
-            #rank_slice = rank_slice
             # Now fill each elements owner:
             owners = np.zeros(global_si.shape, dtype=np.int32)
             for i in range(len(n_rank_slice)):
@@ -293,7 +285,6 @@ class Data(np.ndarray):
                 index = ita.multi_index
                 owner = owners[index]
                 my_slice = n_rank_slice[owner]
-                #my_shift = []
                 rnorm_index = []
                 for j, k in zip(my_slice, index):
                     rnorm_index.append(k-j.start)
@@ -302,72 +293,31 @@ class Data(np.ndarray):
 
             # copy then overwrite?
             # FIXME: Needs to be type Data
-            #retval = np.array(np.zeros(local_val.shape, dtype=local_val.dtype))
             retval = Data(local_val.shape, local_val.dtype.type,
                           decomposition=local_val._decomposition, modulo=local_val._modulo,
                           distributor=local_val._distributor)
-            #retval.__dict__.update(local_val.__dict__)
-            #retval = np.copy(local_val[:])
-            #retval[:] = 0
-            #from IPython import embed; embed()
             it2 =  np.nditer(owners, flags=['refs_ok', 'multi_index'])
             while not it2.finished:
                 index = it2.multi_index
                 if rank == owners[index] and rank == send[index]:
-                    #loc_ind = retval._convert_index(index)
-                    #send_ind = retval._convert_index(global_si[index])
-                    # we have 'global_si' and 'local_si' and 'index'
                     loc_ind = local_si[index]
                     send_ind = local_si[global_si[index]]
                     retval.data[send_ind] = local_val.data[loc_ind]
                 elif rank == owners[index]:
-                    #loc_ind = retval._convert_index(index)
                     loc_ind = local_si[index]
                     send_rank = send[index]
                     send_ind = global_si[index]
                     send_val = local_val.data[loc_ind]
-                    #print(loc_ind)
-                    #print([send_ind, send_val])
                     reqs = comm.isend([send_ind, send_val], dest=send_rank)
                     reqs.wait()
                 elif rank == send[index]:
                     recval = comm.irecv(source=owners[index])
                     local_dat = recval.wait()
                     loc_ind = local_si[local_dat[0]]
-                    #print(loc_ind)
                     retval.data[loc_ind] = local_dat[1]
                 else:
                     pass
                 it2.iternext()
-            #from IPython import embed; embed()
-
-            #owner_map = np.zeros(global_size, dtype=np.int32)
-            #it2 = np.nditer(m_rank_mat, flags=['refs_ok', 'multi_index'])
-            #while not it2.finished:
-                #index = it.multi_index
-                #if m_rank_mat[index].mask:
-                    #pass
-                #else:
-                    #owner_map[rank_slice[some index]] = m_rank_mat[index]
-            #from IPython import embed; embed()
-            
-
-            #rank_comm = rank_mat[as_tuple(transform)].reshape(nprocs)
-            #send_rank = np.where(rank_comm == self._distributor.myrank)[0][0]
-
-            #self._index_stash = glb_idx
-            #reqs = comm.isend(super(Data, self).__getitem__(loc_idx), dest=send_rank)
-            #reqs.wait()
-            #recval = comm.irecv(source=rank_comm[self._distributor.myrank])
-            #retval = recval.wait()
-            #self._index_stash = None
-
-            # FIXME: Horrid, broken...
-            #retval._index_stash = self._index_stash
-            #retval._modulo = self._modulo
-            #retval._decomposition = self._decomposition
-            #retval._distributor = self._distributor
-            #retval._is_distributed = self._is_distributed
             return retval
         elif loc_idx is NONLOCAL:
             # Caller expects a scalar. However, `glb_idx` doesn't belong to
@@ -379,20 +329,9 @@ class Data(np.ndarray):
             self._index_stash = None
             return retval
 
-    def __setitem__(self, glb_idx, val):
+    @check_slicing
+    def __setitem__(self, glb_idx, val, mpi_slicing=False):
         loc_idx = self._convert_index(glb_idx)
-
-        # FIXME: Change this horrible code to tag:
-        if self._is_mpi_distributed:
-            for i in as_tuple(loc_idx):
-                if isinstance(i, slice) and i.step is not None and i.step < 0:
-                    ADVANCED_SLICING = True
-                    break
-                else:
-                    ADVANCED_SLICING = False
-        else:
-            ADVANCED_SLICING = False
-
         if loc_idx is NONLOCAL:
             # no-op
             return
@@ -404,7 +343,7 @@ class Data(np.ndarray):
             else:
                 super(Data, self).__setitem__(glb_idx, val)
         elif isinstance(val, Data) and val._is_distributed:
-            if ADVANCED_SLICING:
+            if mpi_slicing:
                 # `val` is decomposed, `self` is decomposed -> local set
                 # FIXME: need to fix the new decomp for RHS's such as f.data[-2:, -2:]
                 val_idx = as_tuple([slice(i.glb_min, i.glb_max+1, 1) for
