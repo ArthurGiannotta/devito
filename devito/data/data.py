@@ -138,6 +138,14 @@ class Data(np.ndarray):
         ret._is_distributed = any(i is not None for i in decomposition)
         return ret
 
+    def check_slicing(func):
+        @wraps(func)
+        def wrapper(data, *args, **kwargs):
+
+            kwargs['mpi_slicing'] = 
+            return func(data, *args, **kwargs)
+        return wrapper
+
     @property
     def _is_mpi_distributed(self):
         return self._is_distributed and configuration['mpi']
@@ -145,21 +153,22 @@ class Data(np.ndarray):
     def __repr__(self):
         return super(Data, self._local).__repr__()
 
-    def __getitem__(self, glb_idx):
+    @check_slicing
+    def __getitem__(self, glb_idx, mpi_slicing=False):
         loc_idx = self._convert_index(glb_idx)
 
-        # FIXME: Change this horrible code to a tag:
-        if self._is_mpi_distributed:
-            for i in as_tuple(loc_idx):
-                if isinstance(i, slice) and i.step is not None and i.step < 0:
-                    ADVANCED_SLICING = True
-                    break
-                else:
-                    ADVANCED_SLICING = False
-        else:
-            ADVANCED_SLICING = False
+        ## FIXME: Change this horrible code to a tag:
+        #if self._is_mpi_distributed:
+            #for i in as_tuple(loc_idx):
+                #if isinstance(i, slice) and i.step is not None and i.step < 0:
+                    #ADVANCED_SLICING = True
+                    #break
+                #else:
+                    #ADVANCED_SLICING = False
+        #else:
+            #ADVANCED_SLICING = False
 
-        if ADVANCED_SLICING:
+        if mpi_slicing:
             # Data slicing with a negative step and therefore need to transfer data
             # between ranks
             
@@ -176,6 +185,7 @@ class Data(np.ndarray):
 
             self._index_stash = glb_idx
             #local_val = super(Data, self).__getitem__(loc_idx)
+            # FIXME: Local val currently returning the wrong decompositin
             local_val = super(Data, self).__getitem__(blah_slice)
             self._index_stash = None
 
@@ -292,9 +302,14 @@ class Data(np.ndarray):
 
             # copy then overwrite?
             # FIXME: Needs to be type Data
-            retval = np.array(np.zeros(local_val.shape, dtype=local_val.dtype))
+            #retval = np.array(np.zeros(local_val.shape, dtype=local_val.dtype))
+            retval = Data(local_val.shape, local_val.dtype.type,
+                          decomposition=local_val._decomposition, modulo=local_val._modulo,
+                          distributor=local_val._distributor)
+            #retval.__dict__.update(local_val.__dict__)
             #retval = np.copy(local_val[:])
-            retval[:] = 0
+            #retval[:] = 0
+            #from IPython import embed; embed()
             it2 =  np.nditer(owners, flags=['refs_ok', 'multi_index'])
             while not it2.finished:
                 index = it2.multi_index
@@ -304,7 +319,7 @@ class Data(np.ndarray):
                     # we have 'global_si' and 'local_si' and 'index'
                     loc_ind = local_si[index]
                     send_ind = local_si[global_si[index]]
-                    retval[send_ind] = local_val.data[loc_ind]
+                    retval.data[send_ind] = local_val.data[loc_ind]
                 elif rank == owners[index]:
                     #loc_ind = retval._convert_index(index)
                     loc_ind = local_si[index]
@@ -320,7 +335,7 @@ class Data(np.ndarray):
                     local_dat = recval.wait()
                     loc_ind = local_si[local_dat[0]]
                     #print(loc_ind)
-                    retval[loc_ind] = local_dat[1]
+                    retval.data[loc_ind] = local_dat[1]
                 else:
                     pass
                 it2.iternext()
