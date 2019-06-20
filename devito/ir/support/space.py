@@ -125,7 +125,7 @@ class Interval(AbstractInterval):
 
     def __init__(self, dim, lower, upper):
         assert (is_integer(lower) or isinstance(lower, sympy.Expr))
-        assert (is_integer(upper) or isinstance(lower, sympy.Expr))
+        assert (is_integer(upper) or isinstance(upper, sympy.Expr))
         super(Interval, self).__init__(dim)
         self.lower = lower
         self.upper = upper

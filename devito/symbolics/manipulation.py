@@ -1,7 +1,7 @@
 from collections import Iterable, OrderedDict, namedtuple
 
 import sympy
-from sympy import Number, Indexed, Symbol, LM, LC
+from sympy import Number, Indexed, Symbol, LM, LC, Expr
 
 from devito.symbolics.extended_sympy import Add, Mul, Pow, Eq, FrozenExpr
 from devito.symbolics.search import retrieve_indexed, retrieve_functions
@@ -222,12 +222,12 @@ def as_symbol(expr):
         return Symbol(expr)
     elif isinstance(expr, Dimension):
         return Symbol(expr.name)
-    elif (isinstance(expr.args[0], Number) and isinstance(expr.args[1], Dimension)):
-        return expr
     elif expr.is_Symbol:
         return expr
     elif isinstance(expr, Indexed):
         return expr.base.label
+    elif isinstance(expr, Expr):
+        return expr
     else:
         raise TypeError("Cannot extract symbol from type %s" % type(expr))
 
