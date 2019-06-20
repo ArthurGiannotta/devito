@@ -108,7 +108,6 @@ class Data(np.ndarray):
                 else:
                     decomposition.append(dec.reshape(i))
             self._decomposition = tuple(decomposition)
-            self._index_stash = obj._index_stash
         else:
             self._is_distributed = obj._is_distributed
             self._distributor = obj._distributor
@@ -166,8 +165,6 @@ class Data(np.ndarray):
     @check_slicing
     def __getitem__(self, glb_idx, mpi_slicing=False):
         loc_idx = self._convert_index(glb_idx)
-        print(glb_idx, loc_idx)
-        from IPython import embed; embed()
         if mpi_slicing:
             # Retrieve the pertinent local data prior to mpi send/receive operations
             loc_data_idx = []
@@ -202,8 +199,10 @@ class Data(np.ndarray):
                         mask[j] = 1
             # This 'transform' will be required to produce the required maps
             # NOTE: Doudble check the 'else 0' is robust.
+            #transform = as_tuple([slice(None, None, np.sign(i.step)) if isinstance(i, slice)
+                                  #else 0 for i in as_tuple(loc_idx)])
             transform = as_tuple([slice(None, None, np.sign(i.step)) if isinstance(i, slice)
-                                  else 0 for i in as_tuple(loc_idx)])
+                                  else 0 for i in as_tuple(glb_idx)])
             # Maksed rank matrices
             m_rank_mat = np.ma.masked_array(rank_mat, mask=mask.reshape(topology))
             m_rank_mat[None, ~m_rank_mat.mask] = m_rank_mat[None, ~m_rank_mat.mask][transform]
@@ -278,6 +277,7 @@ class Data(np.ndarray):
                     continue
                 else:
                     owners[n_rank_slice[i]] = i
+            from IPython import embed; embed()
             send = owners[transform]
 
             # local_indices
@@ -448,9 +448,6 @@ class Data(np.ndarray):
 
     def _convert_index(self, glb_idx):
         glb_idx = self._normalize_index(glb_idx)
-        print('glb_idx = ', glb_idx)
-        print('dec = ', self._decomposition)
-
         if len(glb_idx) > self.ndim:
             # Maybe user code is trying to add a new axis (see np.newaxis),
             # so the resulting array will be higher dimensional than `self`,
@@ -469,10 +466,7 @@ class Data(np.ndarray):
                 # Need to convert the user-provided global indices into local indices.
                 # Obviously this will have no effect if MPI is not used
                 try:
-                    print('index_glb_to_loc')
-                    print(i, dec)
                     v = index_glb_to_loc(i, dec)
-                    print('v = ', v)
                 except TypeError:
                     if self._is_mpi_distributed:
                         raise NotImplementedError("Unsupported advanced indexing with "
@@ -483,7 +477,6 @@ class Data(np.ndarray):
 
             # Handle non-local, yet globally legal, indices
             v = index_handle_oob(v)
-            print('v = ', v)
 
             loc_idx.append(v)
 
