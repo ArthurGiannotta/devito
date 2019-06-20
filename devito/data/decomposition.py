@@ -202,6 +202,7 @@ class Decomposition(tuple):
         if len(args) == 1:
             glb_idx = args[0]
             if is_integer(glb_idx):
+                from IPython import embed; embed()
                 # convert_index(index)
                 # -> Base case, empty local subdomain
                 if self.loc_empty:
