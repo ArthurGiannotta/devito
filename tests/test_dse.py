@@ -6,7 +6,6 @@ from unittest.mock import patch
 from conftest import skipif, EVAL, x, y, z  # noqa
 from devito import (Eq, Inc, Constant, Function, TimeFunction, SparseTimeFunction,  # noqa
                     SubDimension, Grid, Operator, switchconfig, configuration)
-
 from devito.ir import Stencil, FlowGraph, FindSymbols, retrieve_iteration_tree  # noqa
 from devito.dle import BlockDimension
 from devito.dse import common_subexprs_elimination, collect
