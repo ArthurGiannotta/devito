@@ -44,15 +44,13 @@ def test_scheduling_after_rewrite():
     assert trees[1][0].dim == trees[2][0].dim == trees[3][0].dim == grid.time_dim
 
 
-@pytest.mark.parametrize("skew_factor", [(2), (4), (6), (7)])
 @pytest.mark.parametrize("nx,ny", [(5, 6), (4, 16), (20, 20), (100, 100)])
-def test_skew_vs_advanced(skew_factor, nx, ny):
+def test_skew_vs_advanced(nx, ny):
     """Trivial testing for DSE skewing"""
     nx = 10
     ny = 10
     timesteps = 1
     grid = Grid(shape=(nx, ny))
-    configuration['skew_factor'] = skew_factor
     u_skew = TimeFunction(name='u_skew', grid=grid)
     u = TimeFunction(name='u', grid=grid)
 
@@ -344,45 +342,6 @@ def test_contracted_alias_shape_after_blocking():
     eqn = Eq(u.forward, ((u[t, x, y, z] + u[t, x, y+1, z+1])*3*f +
                          (u[t, x, y+2, z+2] + u[t, x, y+3, z+3])*3*f + 1))
     op0 = Operator(eqn, dse='basic', dle=('advanced', {'openmp': True}))
-    op1 = Operator(eqn, dse='aggressive', dle=('advanced', {'openmp': True}))
-
-    y0_blk_size = op1.parameters[9]
-    z_size = op1.parameters[-1]
-
-    arrays = [i for i in FindSymbols().visit(op1._func_table['bf0'].root) if i.is_Array]
-    assert len(arrays) == 1
-    a = arrays[0]
-    assert len(a.dimensions) == 2
-    assert a.halo == [(1, 1), (1, 1)]
-    assert Add(*a.symbolic_shape[0].args) == y0_blk_size + 2
-    assert Add(*a.symbolic_shape[1].args) == z_size + 2
-    # Check numerical output
-    op0(time_M=1)
-    exp = np.copy(u.data[:])
-    u.data_with_halo[:] = 0.
-    op1(time_M=1)
-    assert np.all(u.data == exp)
-
-
-@patch("devito.dse.rewriters.AdvancedRewriter.MIN_COST_ALIAS", 1)
-def test_contracted_alias_shape_after_blocking_skewing():
-    """
-    Like `test_full_alias_shape_after_blocking`, but a different
-    Operator is used, leading to contracted Arrays (2D instead of 3D).
-    """
-    grid = Grid(shape=(3, 3, 3))
-    x, y, z = grid.dimensions  # noqa
-    t = grid.stepping_dim
-
-    f = Function(name='f', grid=grid)
-    f.data_with_halo[:] = 1.
-    u = TimeFunction(name='u', grid=grid, space_order=3)
-    u.data_with_halo[:] = 0.
-
-    # Leads to 2D aliases
-    eqn = Eq(u.forward, ((u[t, x, y, z] + u[t, x, y+1, z+1])*3*f +
-                         (u[t, x, y+2, z+2] + u[t, x, y+3, z+3])*3*f + 1))
-    op0 = Operator(eqn, dse='skewing', dle=('advanced', {'openmp': True}))
     op1 = Operator(eqn, dse='aggressive', dle=('advanced', {'openmp': True}))
 
     y0_blk_size = op1.parameters[9]
