@@ -1,7 +1,6 @@
 import numpy as np
 from argparse import ArgumentParser
 
-from devito.logger import warning
 from examples.seismic import demo_model, AcquisitionGeometry
 from examples.seismic.tti import AnisotropicWaveSolver
 
@@ -36,9 +35,6 @@ def run(shape=(50, 50, 50), spacing=(20.0, 20.0, 20.0), tn=250.0,
 
     solver = tti_setup(shape, spacing, tn, space_order, nbpml, **kwargs)
 
-    if space_order % 4 != 0:
-        warning('WARNING: TTI requires a space_order that is a multiple of 4!')
-
     rec, u, v, summary = solver.forward(autotune=autotune, kernel=kernel)
 
     return summary.gflopss, summary.oi, summary.timings, [rec, u, v]
@@ -64,7 +60,7 @@ if __name__ == "__main__":
                         choices=["noop", "basic", "advanced", "aggressive"],
                         help="Devito symbolic engine (DSE) mode")
     parser.add_argument("-dle", default="advanced",
-                        choices=["basic", "advanced", "speculative"],
+                        choices=["noop", "advanced", "speculative"],
                         help="Devito loop engine (DLE) mode")
     args = parser.parse_args()
 

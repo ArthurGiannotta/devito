@@ -29,9 +29,9 @@ def t(grid):
 @skipif(['yask', 'ops'])
 class TestFD(object):
     """
-    Class for finite difference testing
-    Tests the accuracy w.r.t polynomials
-    Test that the shortcut produce the same answer as the FD functions
+    Class for finite difference testing.
+    Tests the accuracy w.r.t polynomials.
+    Test that the shortcut produce the same answer as the FD functions.
     """
 
     def setup_method(self):
@@ -79,7 +79,10 @@ class TestFD(object):
         (TimeFunction, ['dx2'], 3, 'Derivative(u(t, x, y, z), (x, 2))'),
         (TimeFunction, ['dx2dy'], 3, 'Derivative(u(t, x, y, z), (x, 2), y)'),
         (TimeFunction, ['dx2', 'dy'], 3,
-         'Derivative(Derivative(u(t, x, y, z), (x, 2)), y)')
+         'Derivative(Derivative(u(t, x, y, z), (x, 2)), y)'),
+        (TimeFunction, ['dx', 'dy', 'dx2', 'dz', 'dydz'], 3,
+         'Derivative(Derivative(Derivative(Derivative(Derivative(u(t, x, y, z), x), y),' +
+         ' (x, 2)), z), y, z)')
     ])
     def test_unevaluation(self, SymbolType, derivative, dim, expected):
         u = SymbolType(name='u', grid=self.grid, time_order=2, space_order=2)
@@ -92,13 +95,23 @@ class TestFD(object):
 
     @pytest.mark.parametrize('expr,expected', [
         ('u.dx + u.dy', 'Derivative(u, x) + Derivative(u, y)'),
+        ('u.dxdy', 'Derivative(u, x, y)'),
         ('u.laplace',
          'Derivative(u, (x, 2)) + Derivative(u, (y, 2)) + Derivative(u, (z, 2))'),
-        ('(u.dx*u.dy).dx', 'Derivative(Derivative(u, x) * Derivative(u, y), x)')
+        ('(u.dx + u.dy).dx', 'Derivative(Derivative(u, x) + Derivative(u, y), x)'),
+        ('((u.dx + u.dy).dx + u.dxdy).dx',
+         'Derivative(Derivative(Derivative(u, x) + Derivative(u, y), x) +' +
+         ' Derivative(u, x, y), x)'),
+        ('(u**4).dx', 'Derivative(u**4, x)'),
+        ('(u/4).dx', 'Derivative(u/4, x)'),
+        ('((u.dx + v.dy).dx * v.dx).dy.dz',
+         'Derivative(Derivative(Derivative(Derivative(u, x) + Derivative(v, y), x) *' +
+         ' Derivative(v, x), y), z)')
     ])
     def test_arithmetic(self, expr, expected):
         x, y, z = self.grid.dimensions
         u = Function(name='u', grid=self.grid, time_order=2, space_order=2)  # noqa
+        v = Function(name='v', grid=self.grid, time_order=2, space_order=2)  # noqa
         expr = eval(expr)
         expected = eval(expected)
         assert expr == expected
@@ -138,7 +151,9 @@ class TestFD(object):
     ])
     @pytest.mark.parametrize('order', [2, 4, 6, 8, 10, 12, 14, 16])
     def test_second_derivatives_space(self, derivative, dim, order):
-        """Test second derivative expressions against native sympy"""
+        """
+        Test second derivative expressions against native sympy.
+        """
         dim = dim(self.grid)
         u = TimeFunction(name='u', grid=self.grid, time_order=2, space_order=order)
         expr = getattr(u, derivative).evaluate
@@ -156,9 +171,7 @@ class TestFD(object):
         """
         This test compares the discrete finite-difference scheme against polynomials
         For a given order p, the finite difference scheme should
-        be exact for polynomials of order p
-        :param derivative: name of the derivative to be tested
-        :param space_order: space order of the finite difference stencil
+        be exact for polynomials of order p.
         """
         clear_cache()
         # dummy axis dimension
@@ -200,8 +213,6 @@ class TestFD(object):
         This test compares the discrete finite-difference scheme against polynomials
         For a given order p, the finite difference scheme should
         be exact for polynomials of order p
-        :param derivative: name of the derivative to be tested
-        :param space_order: space order of the finite difference stencil
         """
         clear_cache()
         # dummy axis dimension
@@ -299,7 +310,7 @@ class TestFD(object):
     @pytest.mark.parametrize('so', [2, 5, 8])
     def test_all_shortcuts(self, so):
         """
-        Test that verify that all fd shortcuts are functional
+        Test that verify that all fd shortcuts are functional.
         """
         grid = Grid(shape=(10, 10, 10))
         f = Function(name='f', grid=grid, space_order=so)
@@ -327,12 +338,12 @@ class TestFD(object):
         g_deriv = Function(name='g_deriv', grid=grid, space_order=so)
         g.data[:, :] = np.random.rand(50, 50, 50)
 
-        # Check symbolic expressio nare expected oens for the adjoint .T
+        # Check symbolic expression are expected ones for the adjoint .T
         deriv = getattr(f, derivative)
         expected = adjoint_coeff * getattr(f, adjoint_name).evaluate
         assert deriv.T.evaluate == expected
 
-        # Compute numerical dervivatives and verify dot test
+        # Compute numerical derivatives and verify dot test
         #  i.e <f.dx, g> = <f, g.dx.T>
 
         eq_f = Eq(f_deriv, deriv)

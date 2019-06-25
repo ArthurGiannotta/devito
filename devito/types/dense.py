@@ -905,8 +905,12 @@ class Function(DiscreteFunction, Differentiable):
 
     >>> f.dxl
     Derivative(f(x, y), x)
-    >>> g.dxl
-    Derivative(g(x, y), x)
+
+    Note that the fact that it's a left-derivative isn't captured in the representation.
+    However, upon derivative expansion, this becomes clear
+
+    >>> f.dxl.evaluate
+    f(x, y)/h_x - f(x - h_x, y)/h_x
     >>> f.dxr
     Derivative(f(x, y), x)
 
@@ -1276,7 +1280,7 @@ class TimeFunction(Function):
                                   % (self._time_size, self.name, key_time_size))
 
     # Pickling support
-    _pickle_kwargs = Function._pickle_kwargs + ['time_order', 'save']
+    _pickle_kwargs = Function._pickle_kwargs + ['time_order', 'save', 'time_dim']
 
 
 class SubFunction(Function):
