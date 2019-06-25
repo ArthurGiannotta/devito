@@ -166,9 +166,11 @@ class Data(np.ndarray):
     def __getitem__(self, glb_idx, mpi_slicing=False):
         loc_idx = self._convert_index(glb_idx)
         if mpi_slicing:
+            # FIXME: Still need to deal with the case when len(loc_idx) < len(local_val.shape)
             # Retrieve the pertinent local data prior to mpi send/receive operations
             loc_data_idx = []
             for i in as_tuple(loc_idx):
+                # NOTE: Can probably remove 'and i.step is not None'
                 if isinstance(i, slice) and i.step is not None and i.step < 0:
                     if i.stop is None:
                         loc_data_idx.append(slice(0, i.start+1, -i.step))
@@ -180,13 +182,14 @@ class Data(np.ndarray):
                     loc_data_idx.append(i)
             loc_data_idx = as_tuple(loc_data_idx)
 
-            #self._index_stash = glb_idx
-            # FIXME: local_val currently returning the wrong decompositin (general problem)
+            # FIXME: local_val currently returning the wrong decompositin (general problem
+            # and not related to this branch)
             local_val = super(Data, self).__getitem__(loc_data_idx)
-            #self._index_stash = None
 
-            #from IPython import embed; embed()
-            # Note: If local_val.size == 0 return now on those ranks?
+            # NOTE: If 'local_val.size == 0' return on a specific rank we can probably
+            # return now. Double check.
+            #if local_val.size == 0:
+                #return local_val
 
             rank = self._distributor.myrank
             comm = self._distributor.comm
@@ -207,9 +210,12 @@ class Data(np.ndarray):
                     #dat_struct.append(comm.bcast(local_val.shape, root=j))
                     if any(k == 0 for k in dat_struct[j]):
                         mask[j] = 1
-            for i in dat_len:
-                if any([j == 0 for j in i]):
-                    i = as_tuple([0]*len(i))
+            for i in rank_coords:
+                if any([j == 0 for j in dat_len[i]]):
+                    dat_len[i] = as_tuple([0]*len(i))
+            #for i in dat_len:
+                #if any([j == 0 for j in i]):
+                    #i = as_tuple([0]*len(i))
             dat_len_cum = np.zeros(topology, dtype=tuple)
             for i in range(nprocs):
                 my_coords = rank_coords[i]
@@ -236,10 +242,16 @@ class Data(np.ndarray):
                 dat_len_cum[my_coords] = as_tuple(n_dat)
             # This 'transform' will be required to produce the required maps
             # NOTE: Doudble check the 'else 0' is robust.
-            #transform = as_tuple([slice(None, None, np.sign(i.step)) if isinstance(i, slice)
-                                  #else 0 for i in as_tuple(loc_idx)])
-            transform = as_tuple([slice(None, None, np.sign(i.step)) if isinstance(i, slice)
-                                  else 0 for i in as_tuple(glb_idx)])
+            transform = []
+            for i in as_tuple(loc_idx):
+                if isinstance(i, slice):
+                    if i.step is not None:
+                        transform.append(slice(None, None, np.sign(i.step)))
+                    else:
+                        transform.append(slice(None, None, None))
+                else:
+                    transform.append(0)
+            transform = as_tuple(transform)
             # Maksed rank matrices
             m_rank_mat = np.ma.masked_array(rank_mat, mask=mask.reshape(topology))
             m_rank_mat[None, ~m_rank_mat.mask] = m_rank_mat[None, ~m_rank_mat.mask][transform]

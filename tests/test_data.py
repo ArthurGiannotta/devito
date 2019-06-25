@@ -499,6 +499,95 @@ class TestDataDistributed(object):
         else:
             assert np.all(u.data == [[5, 4], [1, 0]])
 
+
+        # __getitem__ mpi slicing tests:
+        grid0 = Grid(shape=(8, 8))
+        x0, y0 = grid0.dimensions
+        glb_pos_map0 = grid0.distributor.glb_pos_map
+        myrank0 = grid0.distributor.myrank
+        f = Function(name='f', grid=grid0, space_order=0, dtype=np.int32)
+
+        grid1 = Grid(shape=(12, 12))
+        x1, y1 = grid1.dimensions
+        glb_pos_map1 = grid1.distributor.glb_pos_map
+        myrank1 = grid1.distributor.myrank
+        g = Function(name='g', grid=grid1, space_order=0, dtype=np.int32)
+
+        h = Function(name='h', grid=grid1, space_order=0, dtype=np.int32)
+
+        test_dat = np.arange(64, dtype=np.int32)
+        a = test_dat.reshape(grid0.shape)
+
+        f.data[:] = a
+
+        result0 = np.array(f.data[::-1, ::-1])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(result0[0] == [[63, 62, 61, 60]])
+            assert np.all(result0[1] == [[55, 54, 53, 52]])
+            assert np.all(result0[2] == [[47, 46, 45, 44]])
+            assert np.all(result0[3] == [[39, 38, 37, 36]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(result0[0] == [[59, 58, 57, 56]])
+            assert np.all(result0[1] == [[51, 50, 49, 48]])
+            assert np.all(result0[2] == [[43, 42, 41, 40]])
+            assert np.all(result0[3] == [[35, 34, 33, 32]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(result0[0] == [[31, 30, 29, 28]])
+            assert np.all(result0[1] == [[23, 22, 21, 20]])
+            assert np.all(result0[2] == [[15, 14, 13, 12]])
+            assert np.all(result0[3] == [[ 7,  6,  5,  4]])
+        else:
+            assert np.all(result0[0] == [[27, 26, 25, 24]])
+            assert np.all(result0[1] == [[19, 18, 17, 16]])
+            assert np.all(result0[2] == [[11, 10,  9,  8]])
+            assert np.all(result0[3] == [[ 3,  2,  1,  0]])
+
+        result1 = np.array(f.data[5, 6:1:-1])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert result1.size == 0
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert result1.size == 0
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(result1 == [[46, 45]])
+        else:
+            assert np.all(result1 == [[44, 43, 42]])
+
+        result2 = np.array(f.data[6:4:-1, 6:1:-1])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert result2.size == 0
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert result2.size == 0
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(result2[0] == [[54, 53]])
+            assert np.all(result2[1] == [[46, 45]])
+        else:
+            assert np.all(result2[0] == [[52, 51, 50]])
+            assert np.all(result2[1] == [[44, 43, 42]])
+
+        result3 = np.array(f.data[6:4:-1, 2:7])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert result3.size == 0
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert result3.size == 0
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(result3[0] == [[50, 51]])
+            assert np.all(result3[1] == [[42, 43]])
+        else:
+            assert np.all(result3[0] == [[52, 53, 54]])
+            assert np.all(result3[1] == [[44, 45, 46]])
+
+        result4 = np.array(f.data[4:2:-1, 6:1:-1])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(result4 == [[38, 37]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(result4 == [[36, 35, 34]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(result4 == [[30, 29]])
+        else:
+            assert np.all(result4 == [[28, 27, 26]])
+
+        # NOTE: Add tests with step size > 1
+
     @pytest.mark.parallel(mode=4)
     def test_indexing_in_views(self):
         grid = Grid(shape=(4, 4))
