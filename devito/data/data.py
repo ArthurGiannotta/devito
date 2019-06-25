@@ -166,7 +166,8 @@ class Data(np.ndarray):
     def __getitem__(self, glb_idx, mpi_slicing=False):
         loc_idx = self._convert_index(glb_idx)
         if mpi_slicing:
-            # FIXME: Still need to deal with the case when len(loc_idx) < len(local_val.shape)
+            # FIXME: Still need to deal with the case when
+            # len(loc_idx) < len(local_val.shape)
             # Retrieve the pertinent local data prior to mpi send/receive operations
             loc_data_idx = []
             for i in as_tuple(loc_idx):
@@ -187,9 +188,7 @@ class Data(np.ndarray):
             local_val = super(Data, self).__getitem__(loc_data_idx)
 
             # NOTE: If 'local_val.size == 0' return on a specific rank we can probably
-            # return now. Double check.
-            #if local_val.size == 0:
-                #return local_val
+            # return now. Double check
 
             rank = self._distributor.myrank
             comm = self._distributor.comm
@@ -201,21 +200,15 @@ class Data(np.ndarray):
             # relevant mappings. Mask ranks with no data.
             # FIXME: Much of the below can be combined
             rank_coords = self._distributor.all_coords
-            dat_struct = []
             dat_len = np.zeros(topology, dtype=tuple)
-            mask = np.zeros(nprocs, dtype=np.int32)
+            mask = np.zeros(topology, dtype=np.int32)
             for j in range(nprocs):
-                    dat_len[rank_coords[j]] = comm.bcast(local_val.shape, root=j)
-                    dat_struct.append(dat_len[rank_coords[j]])
-                    #dat_struct.append(comm.bcast(local_val.shape, root=j))
-                    if any(k == 0 for k in dat_struct[j]):
-                        mask[j] = 1
+                dat_len[rank_coords[j]] = comm.bcast(local_val.shape, root=j)
+                if any(k == 0 for k in dat_len[rank_coords[j]]):
+                    mask[rank_coords[j]] = 1
             for i in rank_coords:
                 if any([j == 0 for j in dat_len[i]]):
                     dat_len[i] = as_tuple([0]*len(i))
-            #for i in dat_len:
-                #if any([j == 0 for j in i]):
-                    #i = as_tuple([0]*len(i))
             dat_len_cum = np.zeros(topology, dtype=tuple)
             for i in range(nprocs):
                 my_coords = rank_coords[i]
@@ -228,8 +221,6 @@ class Data(np.ndarray):
                     shift_coords[j] -= 1
                     mod_coords.append(as_tuple(shift_coords))
                 mod_coords = as_tuple(mod_coords)
-                #for j1, j2 in zip(my_coords, mod_coords):
-                    #n_slice = []
                 n_dat = []
                 for j in range(len(my_coords)):
                     if mod_coords[j][j] < 0:
@@ -254,8 +245,9 @@ class Data(np.ndarray):
             transform = as_tuple(transform)
             # Maksed rank matrices
             m_rank_mat = np.ma.masked_array(rank_mat, mask=mask.reshape(topology))
-            m_rank_mat[None, ~m_rank_mat.mask] = m_rank_mat[None, ~m_rank_mat.mask][transform]
-            m_rank_mat_t = m_rank_mat.reshape(nprocs)
+            m_rank_mat[None, ~m_rank_mat.mask] = \
+                m_rank_mat[None, ~m_rank_mat.mask][transform]
+            # m_rank_mat_t = m_rank_mat.reshape(nprocs)
 
             # FIXME: Better ways of doing this
             global_size = []
@@ -280,7 +272,7 @@ class Data(np.ndarray):
 
             tups = np.zeros(global_size, dtype=tuple)
             global_si = np.zeros(global_size, dtype=tuple)
-            it =  np.nditer(tups, flags=['refs_ok', 'multi_index'])
+            it = np.nditer(tups, flags=['refs_ok', 'multi_index'])
             while not it.finished:
                 index = it.multi_index
                 tups[index] = index
@@ -289,9 +281,9 @@ class Data(np.ndarray):
 
             # create the 'rank' slices
             rank_slice = []
-            for j in dat_struct:
+            for j in rank_coords:
                 this_rank = []
-                for k in j:
+                for k in dat_len[j]:
                     this_rank.append(slice(0, k, 1))
                 rank_slice.append(this_rank)
             # Normalize the slices:
@@ -321,43 +313,14 @@ class Data(np.ndarray):
                         stop = dat_len_cum[my_coords][j]
                     n_slice.append(slice(start, stop, 1))
                 n_rank_slice.append(as_tuple(n_slice))
-            #for i in range(0, len(rank_slice)):
-                #if any([j.stop == j.start for j in rank_slice[i]]):
-                    #n_rank_slice.append(as_tuple([None]*len(rank_slice[i])))
-                    #continue
-                #if i == 0:
-                    #n_rank_slice.append(as_tuple(rank_slice[i]))
-                    #continue
-                #my_coords = rank_coords[j]
-                #mod_coords = []
-                #for j in range(len(my_coords)):
-                    #shift_coords = list(my_coords)
-                    #shift_coords[j] -= 1
-                    #mod_coords.append(as_tuple(shift_coords))
-                #mod_coords = as_tuple(mod_coords)
-                #for j1, j2 in zip(my_coords, mod_coords):
-                    #n_slice = []
-                ##for in zip(, rank_coords[i], rank_coords[i-1])
-                ##for j1, j2, k1, k2 in zip(rank_slice[i], n_rank_slice[i-1], rank_coords[i], rank_coords[i-1]):
-                    ##shift = k1 - k2
-                    ##if shift == 1 and j2 is not None:
-                        ##start = j2.stop
-                        ##stop = start + j1.stop
-                        ##n_slice.append(slice(start, stop, 1))
-                    ##elif shift <= 0 or j2 is None:
-                        ##n_slice.append(j1)
-                    ##else:
-                        ##raise ValueError("Unexpected rank shift")
-                #n_rank_slice.append(as_tuple(n_slice))
             n_rank_slice = as_tuple(n_rank_slice)
-            #from IPython import embed; embed()
 
             # we know how to modify the slices from using m_rank_mat:
             # Now fill each elements owner:
             owners = np.zeros(global_size, dtype=np.int32)
             send = np.zeros(global_size, dtype=np.int32)
             for i in range(len(n_rank_slice)):
-                if any([j == None for j in n_rank_slice[i]]):
+                if any([j is None for j in n_rank_slice[i]]):
                     continue
                 else:
                     owners[n_rank_slice[i]] = i
@@ -365,7 +328,7 @@ class Data(np.ndarray):
 
             # local_indices
             local_si = np.zeros(global_size, dtype=tuple)
-            ita =  np.nditer(local_si, flags=['refs_ok', 'multi_index'])
+            ita = np.nditer(local_si, flags=['refs_ok', 'multi_index'])
             while not ita.finished:
                 index = ita.multi_index
                 owner = owners[index]
@@ -379,10 +342,10 @@ class Data(np.ndarray):
             # copy then overwrite?
             # FIXME: Needs to be type Data
             retval = Data(local_val.shape, local_val.dtype.type,
-                          decomposition=local_val._decomposition, modulo=local_val._modulo,
+                          decomposition=local_val._decomposition,
+                          modulo=local_val._modulo,
                           distributor=local_val._distributor)
-            it2 =  np.nditer(owners, flags=['refs_ok', 'multi_index'])
-            #from IPython import embed; embed()
+            it2 = np.nditer(owners, flags=['refs_ok', 'multi_index'])
             while not it2.finished:
                 index = it2.multi_index
                 if rank == owners[index] and rank == send[index]:

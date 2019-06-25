@@ -499,22 +499,13 @@ class TestDataDistributed(object):
         else:
             assert np.all(u.data == [[5, 4], [1, 0]])
 
-
         # __getitem__ mpi slicing tests:
         grid0 = Grid(shape=(8, 8))
         x0, y0 = grid0.dimensions
-        glb_pos_map0 = grid0.distributor.glb_pos_map
-        myrank0 = grid0.distributor.myrank
         f = Function(name='f', grid=grid0, space_order=0, dtype=np.int32)
-
-        grid1 = Grid(shape=(12, 12))
-        x1, y1 = grid1.dimensions
-        glb_pos_map1 = grid1.distributor.glb_pos_map
-        myrank1 = grid1.distributor.myrank
-        g = Function(name='g', grid=grid1, space_order=0, dtype=np.int32)
-
-        h = Function(name='h', grid=grid1, space_order=0, dtype=np.int32)
-
+        # grid1 = Grid(shape=(12, 12))
+        # g = Function(name='g', grid=grid1, space_order=0, dtype=np.int32)
+        # h = Function(name='h', grid=grid1, space_order=0, dtype=np.int32)
         test_dat = np.arange(64, dtype=np.int32)
         a = test_dat.reshape(grid0.shape)
 
@@ -535,12 +526,12 @@ class TestDataDistributed(object):
             assert np.all(result0[0] == [[31, 30, 29, 28]])
             assert np.all(result0[1] == [[23, 22, 21, 20]])
             assert np.all(result0[2] == [[15, 14, 13, 12]])
-            assert np.all(result0[3] == [[ 7,  6,  5,  4]])
+            assert np.all(result0[3] == [[7, 6, 5, 4]])
         else:
             assert np.all(result0[0] == [[27, 26, 25, 24]])
             assert np.all(result0[1] == [[19, 18, 17, 16]])
-            assert np.all(result0[2] == [[11, 10,  9,  8]])
-            assert np.all(result0[3] == [[ 3,  2,  1,  0]])
+            assert np.all(result0[2] == [[11, 10, 9, 8]])
+            assert np.all(result0[3] == [[3, 2, 1, 0]])
 
         result1 = np.array(f.data[5, 6:1:-1])
         if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
