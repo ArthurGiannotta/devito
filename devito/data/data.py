@@ -244,25 +244,28 @@ class Data(np.ndarray):
                     transform.append(0)
             transform = as_tuple(transform)
             # Maksed rank matrices
-            m_rank_mat = np.ma.masked_array(rank_mat, mask=mask.reshape(topology))
+            m_rank_mat = np.ma.masked_array(rank_mat, mask=mask)
             m_rank_mat[None, ~m_rank_mat.mask] = \
                 m_rank_mat[None, ~m_rank_mat.mask][transform]
             # m_rank_mat_t = m_rank_mat.reshape(nprocs)
 
             # FIXME: Better ways of doing this
+            # FIXME: Giving incorrect size for step >= 2
             global_size = []
             for i, j in zip(glb_idx, self._distributor._glb_shape):
                 if isinstance(i, slice):
                     if i.start is None and i.step is not None and i.step < 0:
-                        start = j-1
+                        start = int(np.floor(j/abs(i.step)))-1
                     elif i.start is None:
                         start = 0
                     else:
                         start = i.start
                     if i.stop is None and i.step is not None and i.step < 0:
                         stop = -1
-                    elif i.stop is None:
-                        stop = j
+                    elif i.stop is None and i.step is not None:
+                        stop = int(np.floor(j/abs(i.step)))
+                    elif i.step is not None:
+                        stop = int(np.floor(i.stop/abs(i.step)))
                     else:
                         stop = i.stop
                     global_size.append(abs(start-stop))
@@ -339,8 +342,6 @@ class Data(np.ndarray):
                 local_si[index] = as_tuple(rnorm_index)
                 ita.iternext()
 
-            # copy then overwrite?
-            # FIXME: Needs to be type Data
             retval = Data(local_val.shape, local_val.dtype.type,
                           decomposition=local_val._decomposition,
                           modulo=local_val._modulo,

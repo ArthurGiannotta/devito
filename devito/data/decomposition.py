@@ -253,7 +253,16 @@ class Decomposition(tuple):
                 if glb_idx_max is not None and glb_idx_max < 0:
                     glb_idx_max = self.glb_max + glb_idx_max + 1
                 # -> Do the actual conversion
-                if glb_idx_min is None or glb_idx_min < self.loc_abs_min:
+                if isinstance(glb_idx, slice) and glb_idx.step is not None \
+                        and glb_idx.step > 1:
+                    if glb_idx.start is None:
+                        loc_min = np.mod(glb_idx.step -
+                                         np.mod(base, glb_idx.step), glb_idx.step)
+                    else:
+                        loc_min = np.mod(glb_idx.step -
+                                         np.mod(base - glb_idx.start, glb_idx.step),
+                                         glb_idx.step)
+                elif glb_idx_min is None or glb_idx_min < self.loc_abs_min:
                     loc_min = self.loc_abs_min - base
                 elif glb_idx_min > self.loc_abs_max:
                     return retfunc(-1, -3)
