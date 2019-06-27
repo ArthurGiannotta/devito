@@ -272,15 +272,17 @@ class Decomposition(tuple):
                         and glb_idx.step < -1:
                     if glb_idx.start is None:
                         # FIXME: Simplify the below when further tests are in place
-                        loc_max = top - base
-                        - np.mod(-glb_idx.step - np.mod(self.glb_max - top -
-                                                        (self.glb_max - self.glb_max),
-                                                        -glb_idx.step), -glb_idx.step)
+                        loc_max = top - base \
+                            - np.mod(-glb_idx.step
+                                     - np.mod(self.glb_max - top -
+                                              (self.glb_max - self.glb_max),
+                                              -glb_idx.step), -glb_idx.step)
                     else:
-                        loc_max = top - base
-                        - np.mod(-glb_idx.step - np.mod(self.glb_max - top -
-                                                        (self.glb_max - glb_idx.start),
-                                                        -glb_idx.step), -glb_idx.step)
+                        loc_max = top - base \
+                            - np.mod(-glb_idx.step
+                                     - np.mod(self.glb_max - top -
+                                              (self.glb_max - glb_idx.start),
+                                              -glb_idx.step), -glb_idx.step)
                 elif glb_idx_max is None or glb_idx_max > self.loc_abs_max:
                     loc_max = self.loc_abs_max - base
                 elif glb_idx_max < self.loc_abs_min:

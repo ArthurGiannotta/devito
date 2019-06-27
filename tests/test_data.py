@@ -577,7 +577,46 @@ class TestDataDistributed(object):
         else:
             assert np.all(result4 == [[28, 27, 26]])
 
-        # NOTE: Add tests with step size > 1
+        # Tests with a step size > 1
+        r0 = np.array(f.data[::3, ::3])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(r0 == [[0, 3], [24, 27]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(r0 == [[6], [30]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(r0 == [[48, 51]])
+        else:
+            assert np.all(r0 == [[54]])
+
+        r1 = np.array(f.data[1::3, 1::3])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(r1 == [[9]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(r1 == [[12, 15]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(r1 == [[33], [57]])
+        else:
+            assert np.all(r1 == [[36, 39], [60, 63]])
+
+        r2 = np.array(f.data[::-3, ::-3])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(r2 == [[63]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(r2 == [[60, 57]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(r2 == [[39], [15]])
+        else:
+            assert np.all(r2 == [[36, 33], [12, 9]])
+
+        r3 = np.array(f.data[6::-3, 6::-3])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(r3 == [[54, 51], [30, 27]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(r3 == [[48], [24]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(r3 == [[6, 3]])
+        else:
+            assert np.all(r3 == [[0]])
 
     @pytest.mark.parallel(mode=4)
     def test_indexing_in_views(self):
