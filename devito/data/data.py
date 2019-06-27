@@ -142,7 +142,10 @@ class Data(np.ndarray):
         @wraps(func)
         def wrapper(data, *args, **kwargs):
             glb_idx = args[0]
-            if data._is_mpi_distributed:
+            if len(args) > 1 and isinstance(args[1], Data) \
+                    and args[1]._is_mpi_distributed:
+                mpi_slicing = True
+            elif data._is_mpi_distributed:
                 for i in as_tuple(glb_idx):
                     if isinstance(i, slice) and i.step is not None and i.step < 0:
                         mpi_slicing = True
@@ -395,13 +398,10 @@ class Data(np.ndarray):
                     idx_global.append(comm.bcast(idx, root=j))
                 # Set the data:
                 for j in range(nprocs):
-                    skip = any(i is None for i in idx_global[j])
+                    skip = any(i is None for i in idx_global[j]) \
+                        or data_global[j].size == 0
                     if not skip:
-                        loc_idx_new = self._convert_index(idx_global[j])
-                        if loc_idx_new is NONLOCAL:
-                            return
-                        else:
-                            self.__setitem__(idx_global[j], data_global[j])
+                        self.__setitem__(idx_global[j], data_global[j])
             elif self._is_distributed:
                 # `val` is decomposed, `self` is decomposed -> local set
                 super(Data, self).__setitem__(glb_idx, val)
@@ -526,30 +526,21 @@ class Data(np.ndarray):
         return loc_idx[0] if len(loc_idx) == 1 else tuple(loc_idx)
 
     def _set_global_idx(self, val, sl1, sl2):
-        data_loc_idx = val._convert_index(sl2)
+        data_loc_idx = as_tuple(val._convert_index(sl2))
         data_global_idx = []
+        # NOTE: This 'should' be robust but needs additional testing
+        if is_integer(sl1[0]):
+            data_global_idx.append(slice(0, 1, 1))
         for i in range(len(sl2)):
             if not val._decomposition[i].loc_empty:
                 data_global_idx.append(
                     val._decomposition[i].convert_index_global(data_loc_idx[i]))
             else:
                 data_global_idx.append(None)
-        # work out bits of sl1 data_global_idx correspond to
-        norms = []
-        # FIXME: sl1 and sl2 should probably be normalised prior to this point:
-        # Maybe create an 'as_slice' function?
-        for i, j in zip(as_tuple(sl1), as_tuple(sl2)):
-            if isinstance(i, slice):
-                # Don't need 'norms.append(i.start-j.start)'?
-                norms.append(i.start)
-            elif i is None:
-                norms.append(0)
-            else:
-                norms.append(i)
         mapped_idx = []
-        for i, j in zip(data_global_idx, norms):
+        for i in data_global_idx:
             if i is not None:
-                mapped_idx.append(slice(i.start+j, i.stop+j, i.step))
+                mapped_idx.append(slice(i.start, i.stop, i.step))
             else:
                 mapped_idx.append(None)
         return as_tuple(mapped_idx)
