@@ -172,9 +172,18 @@ class Data(np.ndarray):
             loc_data_idx = []
             for i in as_tuple(loc_idx):
                 # NOTE: Can probably remove 'and i.step is not None'
-                if isinstance(i, slice) and i.step is not None and i.step < 0:
+                if isinstance(i, slice) and i.step is not None and i.step == -1:
                     if i.stop is None:
                         loc_data_idx.append(slice(0, i.start+1, -i.step))
+                    else:
+                        loc_data_idx.append(slice(i.stop+1, i.start+1, -i.step))
+                elif isinstance(i, slice) and i.step is not None and i.step < -1:
+                    # FIXME: make a nice routine for this
+                    if i.stop is None:
+                        lmin = i.start
+                        while lmin >= 0:
+                            lmin += i.step
+                        loc_data_idx.append(slice(lmin-i.step, i.start+1, -i.step))
                     else:
                         loc_data_idx.append(slice(i.stop+1, i.start+1, -i.step))
                 elif is_integer(i):
@@ -247,31 +256,8 @@ class Data(np.ndarray):
             m_rank_mat = np.ma.masked_array(rank_mat, mask=mask)
             m_rank_mat[None, ~m_rank_mat.mask] = \
                 m_rank_mat[None, ~m_rank_mat.mask][transform]
-            # m_rank_mat_t = m_rank_mat.reshape(nprocs)
 
-            # FIXME: Better ways of doing this
-            # FIXME: Giving incorrect size for step >= 2
-            global_size = []
-            for i, j in zip(glb_idx, self._distributor._glb_shape):
-                if isinstance(i, slice):
-                    if i.start is None and i.step is not None and i.step < 0:
-                        start = int(np.floor(j/abs(i.step)))-1
-                    elif i.start is None:
-                        start = 0
-                    else:
-                        start = i.start
-                    if i.stop is None and i.step is not None and i.step < 0:
-                        stop = -1
-                    elif i.stop is None and i.step is not None:
-                        stop = int(np.floor(j/abs(i.step)))
-                    elif i.step is not None:
-                        stop = int(np.floor(i.stop/abs(i.step)))
-                    else:
-                        stop = i.stop
-                    global_size.append(abs(start-stop))
-                else:
-                    global_size.append(1)
-            global_size = as_tuple(global_size)
+            global_size = dat_len_cum[rank_coords[-1]]
 
             tups = np.zeros(global_size, dtype=tuple)
             global_si = np.zeros(global_size, dtype=tuple)
