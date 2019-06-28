@@ -258,7 +258,8 @@ class Data(np.ndarray):
             # Maksed rank matrices
             m_rank_mat = np.ma.masked_array(rank_mat, mask=mask)
             m_rank_mat[None, ~m_rank_mat.mask] = \
-                m_rank_mat[None, ~m_rank_mat.mask][transform]
+                m_rank_mat[None, ~m_rank_mat.mask]
+            m_rank_mat = m_rank_mat[transform]
 
             global_size = dat_len_cum[rank_coords[-1]]
 
@@ -529,7 +530,7 @@ class Data(np.ndarray):
         data_loc_idx = as_tuple(val._convert_index(sl2))
         data_global_idx = []
         # NOTE: This 'should' be robust but needs additional testing
-        if is_integer(sl1[0]):
+        if is_integer(as_tuple(sl1)[0]):
             data_global_idx.append(slice(0, 1, 1))
         for i in range(len(sl2)):
             if not val._decomposition[i].loc_empty:
@@ -538,9 +539,15 @@ class Data(np.ndarray):
             else:
                 data_global_idx.append(None)
         mapped_idx = []
-        for i in data_global_idx:
+        for i, j in zip(data_global_idx, sl1):
+            if isinstance(j, slice) and j.start is None:
+                norm = 0
+            elif isinstance(j, slice) and j.start is not None:
+                norm = j.start
+            else:
+                norm = j
             if i is not None:
-                mapped_idx.append(slice(i.start, i.stop, i.step))
+                mapped_idx.append(slice(i.start+norm, i.stop+norm, i.step))
             else:
                 mapped_idx.append(None)
         return as_tuple(mapped_idx)
