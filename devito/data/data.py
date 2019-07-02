@@ -539,7 +539,7 @@ class Data(np.ndarray):
             else:
                 data_global_idx.append(None)
         mapped_idx = []
-        for i, j in zip(data_global_idx, sl1):
+        for i, j in zip(data_global_idx, as_tuple(sl1)):
             if isinstance(j, slice) and j.start is None:
                 norm = 0
             elif isinstance(j, slice) and j.start is not None:
