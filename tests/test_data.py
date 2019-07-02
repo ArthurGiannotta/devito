@@ -665,7 +665,7 @@ class TestDataDistributed(object):
                                                [0, 0, 0, 0, 0, 0],
                                                [0, 0, 0, 0, 0, 0]])
 
-        # Higher dimension + niche tests
+        # Higher dimension's + niche tests
         grid2 = Grid(shape=(4, 4, 4))
         x2, y2, z2 = grid2.dimensions
         t = Function(name='t', grid=grid2, space_order=0)
@@ -694,6 +694,44 @@ class TestDataDistributed(object):
                                          [49, 48]])
             assert np.all(c[3, :, :] == [[5, 4],
                                          [1, 0]])
+
+        d = np.array(t.data[::-1])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(d[1, :, :] == [[32, 33],
+                                         [36, 37]])
+            assert np.all(d[2, :, :] == [[16, 17],
+                                         [20, 21]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(d[1, :, :] == [[34, 35],
+                                         [38, 39]])
+            assert np.all(d[2, :, :] == [[18, 19],
+                                         [22, 23]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(d[1, :, :] == [[40, 41],
+                                         [44, 45]])
+            assert np.all(d[2, :, :] == [[24, 25],
+                                         [28, 29]])
+        else:
+            assert np.all(d[1, :, :] == [[42, 43],
+                                         [46, 47]])
+            assert np.all(d[2, :, :] == [[26, 27],
+                                         [30, 31]])
+
+        e = np.array(t.data[:, 3:2:-1])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert e.size == 0
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert e.size == 0
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(e[0] == [[12, 13]])
+            assert np.all(e[1] == [[28, 29]])
+            assert np.all(e[2] == [[44, 45]])
+            assert np.all(e[3] == [[60, 61]])
+        else:
+            assert np.all(e[0] == [[14, 15]])
+            assert np.all(e[1] == [[30, 31]])
+            assert np.all(e[2] == [[46, 47]])
+            assert np.all(e[3] == [[62, 63]])
 
     @pytest.mark.parallel(mode=4)
     def test_indexing_in_views(self):
