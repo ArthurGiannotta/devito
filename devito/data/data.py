@@ -27,6 +27,8 @@ class Data(np.ndarray):
         If the i-th entry is True, then the i-th array dimension uses modulo indexing.
     allocator : MemoryAllocator, optional
         Used to allocate memory. Defaults to ``ALLOC_FLAT``.
+    distributor : Distributor, optional
+        The distributor of the grid on which the Data object sits.
 
     Notes
     -----
@@ -169,19 +171,15 @@ class Data(np.ndarray):
     def __getitem__(self, glb_idx, mpi_slicing=False):
         loc_idx = self._convert_index(glb_idx)
         if mpi_slicing:
-            # FIXME: Still need to deal with the case when
-            # len(loc_idx) < len(local_val.shape)
             # Retrieve the pertinent local data prior to mpi send/receive operations
             loc_data_idx = []
             for i in as_tuple(loc_idx):
-                # NOTE: Can probably remove 'and i.step is not None'
                 if isinstance(i, slice) and i.step is not None and i.step == -1:
                     if i.stop is None:
                         loc_data_idx.append(slice(0, i.start+1, -i.step))
                     else:
                         loc_data_idx.append(slice(i.stop+1, i.start+1, -i.step))
                 elif isinstance(i, slice) and i.step is not None and i.step < -1:
-                    # FIXME: make a nice routine for this
                     if i.stop is None:
                         lmin = i.start
                         while lmin >= 0:
@@ -195,32 +193,28 @@ class Data(np.ndarray):
                     loc_data_idx.append(i)
             loc_data_idx = as_tuple(loc_data_idx)
 
-            # FIXME: local_val currently returning the wrong decompositin (general problem
-            # and not related to this branch)
             local_val = super(Data, self).__getitem__(loc_data_idx)
 
-            # NOTE: If 'local_val.size == 0' return on a specific rank we can probably
-            # return now. Double check
+            # NOTE: If 'local_val.size == 0' we do not need much of the below.
 
             rank = self._distributor.myrank
             comm = self._distributor.comm
             nprocs = self._distributor.nprocs
             topology = self._distributor.topology
+            rank_coords = self._distributor.all_coords
+
             # Produce the 'rank' matrix
             rank_mat = np.arange(nprocs).reshape(topology)
             # Gather data structures from all ranks in order to produce the
             # relevant mappings. Mask ranks with no data.
-            # FIXME: Much of the below can be combined
-            rank_coords = self._distributor.all_coords
             dat_len = np.zeros(topology, dtype=tuple)
             mask = np.zeros(topology, dtype=np.int32)
             for j in range(nprocs):
                 dat_len[rank_coords[j]] = comm.bcast(local_val.shape, root=j)
                 if any(k == 0 for k in dat_len[rank_coords[j]]):
+                    dat_len[rank_coords[j]] = as_tuple([0]*len(dat_len[rank_coords[j]]))
                     mask[rank_coords[j]] = 1
-            for i in rank_coords:
-                if any([j == 0 for j in dat_len[i]]):
-                    dat_len[i] = as_tuple([0]*len(i))
+            # Work out the cumulative data shape
             dat_len_cum = np.zeros(topology, dtype=tuple)
             for i in range(nprocs):
                 my_coords = rank_coords[i]
@@ -244,7 +238,6 @@ class Data(np.ndarray):
                         n_dat.append(c_dat+p_dat)
                 dat_len_cum[my_coords] = as_tuple(n_dat)
             # This 'transform' will be required to produce the required maps
-            # NOTE: Doudble check the 'else 0' is robust.
             transform = []
             for i in as_tuple(loc_idx):
                 if isinstance(i, slice):
@@ -263,14 +256,14 @@ class Data(np.ndarray):
 
             global_size = dat_len_cum[rank_coords[-1]]
 
-            tups = np.zeros(global_size, dtype=tuple)
+            indices = np.zeros(global_size, dtype=tuple)
             global_si = np.zeros(global_size, dtype=tuple)
-            it = np.nditer(tups, flags=['refs_ok', 'multi_index'])
+            it = np.nditer(indices, flags=['refs_ok', 'multi_index'])
             while not it.finished:
                 index = it.multi_index
-                tups[index] = index
+                indices[index] = index
                 it.iternext()
-            global_si[:] = tups[transform]
+            global_si[:] = indices[transform]
 
             # create the 'rank' slices
             rank_slice = []
