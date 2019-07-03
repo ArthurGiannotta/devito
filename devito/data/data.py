@@ -172,30 +172,8 @@ class Data(np.ndarray):
         loc_idx = self._convert_index(glb_idx)
         if mpi_slicing:
             # Retrieve the pertinent local data prior to mpi send/receive operations
-            loc_data_idx = []
-            for i in as_tuple(loc_idx):
-                if isinstance(i, slice) and i.step is not None and i.step == -1:
-                    if i.stop is None:
-                        loc_data_idx.append(slice(0, i.start+1, -i.step))
-                    else:
-                        loc_data_idx.append(slice(i.stop+1, i.start+1, -i.step))
-                elif isinstance(i, slice) and i.step is not None and i.step < -1:
-                    if i.stop is None:
-                        lmin = i.start
-                        while lmin >= 0:
-                            lmin += i.step
-                        loc_data_idx.append(slice(lmin-i.step, i.start+1, -i.step))
-                    else:
-                        loc_data_idx.append(slice(i.stop+1, i.start+1, -i.step))
-                elif is_integer(i):
-                    loc_data_idx.append(slice(i, i+1, 1))
-                else:
-                    loc_data_idx.append(i)
-            loc_data_idx = as_tuple(loc_data_idx)
-
+            loc_data_idx = self._local_data_idx(loc_idx)
             local_val = super(Data, self).__getitem__(loc_data_idx)
-
-            # NOTE: If 'local_val.size == 0' we do not need much of the below.
 
             rank = self._distributor.myrank
             comm = self._distributor.comm
@@ -544,6 +522,28 @@ class Data(np.ndarray):
             else:
                 mapped_idx.append(None)
         return as_tuple(mapped_idx)
+
+    def _local_data_idx(self, loc_idx):
+        loc_data_idx = []
+        for i in as_tuple(loc_idx):
+            if isinstance(i, slice) and i.step is not None and i.step == -1:
+                if i.stop is None:
+                    loc_data_idx.append(slice(0, i.start+1, -i.step))
+                else:
+                    loc_data_idx.append(slice(i.stop+1, i.start+1, -i.step))
+            elif isinstance(i, slice) and i.step is not None and i.step < -1:
+                if i.stop is None:
+                    lmin = i.start
+                    while lmin >= 0:
+                        lmin += i.step
+                    loc_data_idx.append(slice(lmin-i.step, i.start+1, -i.step))
+                else:
+                    loc_data_idx.append(slice(i.stop+1, i.start+1, -i.step))
+            elif is_integer(i):
+                loc_data_idx.append(slice(i, i+1, 1))
+            else:
+                loc_data_idx.append(i)
+        return as_tuple(loc_data_idx)
 
     def reset(self):
         """Set all Data entries to 0."""
