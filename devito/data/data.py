@@ -234,9 +234,9 @@ class Data(np.ndarray):
                 super(Data, self).__setitem__(glb_idx, val)
         elif isinstance(val, Data) and val._is_distributed:
             if mpi_slicing:
-                # FIXME: need to fix the new decomp for RHS's such as f.data[-2:, -2:]
                 # FIXME: MPI sets with step size < 0
                 # FIXME: Sets with |step size| > 1
+                # glb_idx, val = self._process_args(glb_idx, val)
                 val_idx = as_tuple([slice(i.glb_min, i.glb_max+1, 1) for
                                     i in val._decomposition])
                 idx = self._set_global_idx(val, glb_idx, val_idx)

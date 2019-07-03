@@ -358,13 +358,13 @@ class Decomposition(tuple):
                     return loc_idx + self.loc_abs_min
             else:
                 # convert_index((min, max))
-                # convert_index(slice(...))
                 if isinstance(loc_idx, tuple):
                     if len(loc_idx) != 2:
                         raise TypeError("Cannot convert index from `%s`" % type(loc_idx))
                     shifted = [slice(-1, -2, 1) if (i < 0 or i > rank_length) else
                                i + self.loc_abs_min for i in loc_idx]
                     return as_tuple(shifted)
+                # convert_index(slice(...))
                 elif isinstance(loc_idx, slice):
                     if loc_idx.start is not None \
                             and loc_idx.start < 0 or loc_idx.start > rank_length:
@@ -392,11 +392,8 @@ class Decomposition(tuple):
                         else:
                             glb_stop = loc_idx.stop + self.loc_abs_min
                         return slice(glb_start, glb_stop, loc_idx.step)
-        elif len(args) == 2:
-            # FIXME: Do we need this case?
-            raise NotImplementedError
         else:
-            raise TypeError("Expected 1 or 2 arguments, found %d" % len(args))
+            raise TypeError("Expected 1 arguments, found %d" % len(args))
 
     def reshape(self, *args):
         """

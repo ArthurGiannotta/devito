@@ -733,8 +733,18 @@ class TestDataDistributed(object):
             assert np.all(e[2] == [[46, 47]])
             assert np.all(e[3] == [[62, 63]])
 
+        tdat0 = np.array(f.data[-2::, -2::])
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert tdat0.size == 0
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert tdat0.size == 0
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert tdat0.size == 0
+        else:
+            assert np.all(tdat0 == [[54, 55],
+                                    [62, 63]])
+
         # Some additional required tests:
-        # f.data[-3:, -3:] etc
         # g.data[::-1, ::-1] = f.data[:, :] etc
         # g.data[::2, ::2] = f.data[:, :] etc
         # g.data[::-2, ::-2] = f.data[:, :] etc
