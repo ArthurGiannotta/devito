@@ -733,6 +733,12 @@ class TestDataDistributed(object):
             assert np.all(e[2] == [[46, 47]])
             assert np.all(e[3] == [[62, 63]])
 
+        # Some additional required tests:
+        # f.data[-3:, -3:] etc
+        # g.data[::-1, ::-1] = f.data[:, :] etc
+        # g.data[::2, ::2] = f.data[:, :] etc
+        # g.data[::-2, ::-2] = f.data[:, :] etc
+
     @pytest.mark.parallel(mode=4)
     def test_indexing_in_views(self):
         grid = Grid(shape=(4, 4))

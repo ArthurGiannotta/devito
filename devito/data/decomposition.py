@@ -271,18 +271,13 @@ class Decomposition(tuple):
                 if isinstance(glb_idx, slice) and glb_idx.step is not None \
                         and glb_idx.step < -1:
                     if glb_idx.start is None:
-                        # FIXME: Simplify the below when further tests are in place
                         loc_max = top - base \
-                            - np.mod(-glb_idx.step
-                                     - np.mod(self.glb_max - top -
-                                              (self.glb_max - self.glb_max),
-                                              -glb_idx.step), -glb_idx.step)
+                            + np.mod(glb_idx.step - np.mod(top - self.glb_max,
+                                                           glb_idx.step), glb_idx.step)
                     else:
                         loc_max = top - base \
-                            - np.mod(-glb_idx.step
-                                     - np.mod(self.glb_max - top -
-                                              (self.glb_max - glb_idx.start),
-                                              -glb_idx.step), -glb_idx.step)
+                            + np.mod(glb_idx.step - np.mod(top - glb_idx.start,
+                                                           glb_idx.step), glb_idx.step)
                 elif glb_idx_max is None or glb_idx_max > self.loc_abs_max:
                     loc_max = self.loc_abs_max - base
                 elif glb_idx_max < self.loc_abs_min:
@@ -310,27 +305,43 @@ class Decomposition(tuple):
         else:
             raise TypeError("Expected 1 or 2 arguments, found %d" % len(args))
 
-    def convert_index_global(self, *args, rel=True):
+    def convert_index_global(self, *args):
         """
         Convert a local index into a global index.
         Parameters
         ----------
         *args
-            There are three possible cases:
+            There are two possible cases:
             * int. Given ``I``, a local index, return the corresponding
               global local.
-            * int, DataSide.
-            * (int, int).  ?
-            * slice(a, b, c).
-        rel : bool, optional
-            If False, convert into an absolute, instead of a relative, local index.
+            * slice(a, b, c). As above, return the corresponding global slice.
+
         Raises
         ------
         TypeError
             If the input doesn't adhere to any of the supported format.
         Examples
         --------
-        In the following example...
+        In the following example, the domain consists of 12 indices, split over
+        four subdomains [0, 3]. We pick 2 as local subdomain.
+
+        >>> d = Decomposition([[0, 1, 2], [3, 4], [5, 6, 7], [8, 9, 10, 11]], 2)
+        >>> d
+        Decomposition([0,2], [3,4], <<[5,7]>>, [8,11])
+
+        A local index as single argument:
+
+        >>> d.convert_index_global(0)
+        5
+        >>> d.convert_index_global(1)
+        6
+        >>> d.convert_index_global(2)
+        7
+
+        A local slice as an argument:
+
+        >>> d.convert_index_global(slice(0, 2, 1))
+        slice(5, 7, 1)
         """
 
         rank_length = self.loc_abs_max - self.loc_abs_min
@@ -351,14 +362,9 @@ class Decomposition(tuple):
                 if isinstance(loc_idx, tuple):
                     if len(loc_idx) != 2:
                         raise TypeError("Cannot convert index from `%s`" % type(loc_idx))
-                    # FIXME: List comp.
-                    shifted = []
-                    for i in loc_idx:
-                        if i < 0 or i > rank_length:
-                            return slice(-1, -2, 1)
-                        else:
-                            shifted.append(i + self.loc_abs_min)
-                        return as_tuple(shifted)
+                    shifted = [slice(-1, -2, 1) if (i < 0 or i > rank_length) else
+                               i + self.loc_abs_min for i in loc_idx]
+                    return as_tuple(shifted)
                 elif isinstance(loc_idx, slice):
                     if loc_idx.start is not None \
                             and loc_idx.start < 0 or loc_idx.start > rank_length:
