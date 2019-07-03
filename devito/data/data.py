@@ -181,8 +181,6 @@ class Data(np.ndarray):
             topology = self._distributor.topology
             rank_coords = self._distributor.all_coords
 
-            # Produce the 'rank' matrix
-            rank_mat = np.arange(nprocs).reshape(topology)
             # Gather data structures from all ranks in order to produce the
             # relevant mappings. Mask ranks with no data.
             dat_len = np.zeros(topology, dtype=tuple)
@@ -226,11 +224,14 @@ class Data(np.ndarray):
                 else:
                     transform.append(0)
             transform = as_tuple(transform)
-            # Maksed rank matrices
-            m_rank_mat = np.ma.masked_array(rank_mat, mask=mask)
-            m_rank_mat[None, ~m_rank_mat.mask] = \
-                m_rank_mat[None, ~m_rank_mat.mask]
-            m_rank_mat = m_rank_mat[transform]
+
+            ## Produce the 'rank' matrix
+            #rank_mat = np.arange(nprocs).reshape(topology)
+            ## Maksed rank matrices
+            #m_rank_mat = np.ma.masked_array(rank_mat, mask=mask)
+            #m_rank_mat[None, ~m_rank_mat.mask] = \
+                #m_rank_mat[None, ~m_rank_mat.mask]
+            #m_rank_mat = m_rank_mat[transform]
 
             global_size = dat_len_cum[rank_coords[-1]]
 
