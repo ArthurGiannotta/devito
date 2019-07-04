@@ -744,8 +744,38 @@ class TestDataDistributed(object):
             assert np.all(tdat0 == [[54, 55],
                                     [62, 63]])
 
+        g.data[:] = 0
+        g.data[9:1:-1, 9:1:-1] = f.data[:, :]
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(np.array(h.data) == [[0, 0, 0, 0, 0, 0],
+                                               [0, 0, 0, 0, 0, 0],
+                                               [0, 0, 63, 62, 61, 60],
+                                               [0, 0, 55, 54, 53, 52],
+                                               [0, 0, 47, 46, 45, 44],
+                                               [0, 0, 39, 38, 37, 36]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(np.array(h.data) == [[0, 0, 0, 0, 0, 0],
+                                               [0, 0, 0, 0, 0, 0],
+                                               [59, 58, 57, 56, 0, 0],
+                                               [51, 50, 49, 48, 0, 0],
+                                               [43, 42, 41, 40, 0, 0],
+                                               [35, 34, 33, 32, 0, 0]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(np.array(h.data) == [[0, 0, 31, 30, 29, 28],
+                                               [0, 0, 23, 22, 21, 20],
+                                               [0, 0, 15, 14, 13, 12],
+                                               [0, 0, 7, 6, 5, 4],
+                                               [0, 0, 0, 0, 0, 0],
+                                               [0, 0, 0, 0, 0, 0]])
+        else:
+            assert np.all(np.array(h.data) == [[27, 26, 25, 24, 0, 0],
+                                               [19, 18, 17, 16, 0, 0],
+                                               [11, 10, 9, 8, 0, 0],
+                                               [3, 2, 1, 0, 0, 0],
+                                               [0, 0, 0, 0, 0, 0],
+                                               [0, 0, 0, 0, 0, 0]])
+
         # Some additional required tests:
-        # g.data[::-1, ::-1] = f.data[:, :] etc
         # g.data[::2, ::2] = f.data[:, :] etc
         # g.data[::-2, ::-2] = f.data[:, :] etc
 

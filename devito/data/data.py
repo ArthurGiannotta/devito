@@ -234,9 +234,8 @@ class Data(np.ndarray):
                 super(Data, self).__setitem__(glb_idx, val)
         elif isinstance(val, Data) and val._is_distributed:
             if mpi_slicing:
-                # FIXME: MPI sets with step size < 0
                 # FIXME: Sets with |step size| > 1
-                # glb_idx, val = self._process_args(glb_idx, val)
+                glb_idx, val = self._process_args(glb_idx, val)
                 val_idx = as_tuple([slice(i.glb_min, i.glb_max+1, 1) for
                                     i in val._decomposition])
                 idx = self._set_global_idx(val, glb_idx, val_idx)
@@ -248,6 +247,7 @@ class Data(np.ndarray):
                 for j in range(nprocs):
                     data_global.append(comm.bcast(np.array(val), root=j))
                     idx_global.append(comm.bcast(idx, root=j))
+                from IPython import embed; embed()
                 # Set the data:
                 for j in range(nprocs):
                     skip = any(i is None for i in idx_global[j]) \
@@ -312,11 +312,11 @@ class Data(np.ndarray):
             return as_tuple(processed)
 
     def _process_args(self, idx, val):
-        if any(isinstance(i, slice) for i in idx):
+        if any(isinstance(i, slice) and i.step is not None and i.step < 0 for i in idx):
             processed = []
             transform = []
             for j in idx:
-                if isinstance(j, slice) and j.step < 0:
+                if isinstance(j, slice) and j.step is not None and j.step < 0:
                     if j.start is None:
                         stop = None
                     else:
@@ -381,7 +381,7 @@ class Data(np.ndarray):
     def _set_global_idx(self, val, idx, val_idx):
         data_loc_idx = as_tuple(val._convert_index(val_idx))
         data_global_idx = []
-        # Convert integer to slice in so that shape dims are preserved
+        # Convert integers to slices so that shape dims are preserved
         if is_integer(as_tuple(idx)[0]):
             data_global_idx.append(slice(0, 1, 1))
         for i, j in zip(data_loc_idx, val._decomposition):
@@ -398,7 +398,11 @@ class Data(np.ndarray):
             else:
                 norm = j
             if i is not None:
-                mapped_idx.append(slice(i.start+norm, i.stop+norm, i.step))
+                if isinstance(j, slice) and j.step is not None:
+                    mapped_idx.append(slice(j.step*i.start+norm,
+                                            j.step*i.stop+norm, j.step))
+                else:
+                    mapped_idx.append(slice(i.start+norm, i.stop+norm, i.step))
             else:
                 mapped_idx.append(None)
         return as_tuple(mapped_idx)
