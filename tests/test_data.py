@@ -796,7 +796,7 @@ class TestDataDistributed(object):
             assert np.all(np.array(f.data) == [[10, 0, 11, 0],
                                                [0, 0, 0, 0],
                                                [14, 0, 15, 0],
-                                               [0, 0, 0, 0]])       
+                                               [0, 0, 0, 0]])
 
         # Some additional required tests:
         # FIXME: This still doesn't work
