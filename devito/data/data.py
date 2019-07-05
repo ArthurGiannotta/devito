@@ -247,7 +247,6 @@ class Data(np.ndarray):
                 for j in range(nprocs):
                     data_global.append(comm.bcast(np.array(val), root=j))
                     idx_global.append(comm.bcast(idx, root=j))
-                from IPython import embed; embed()
                 # Set the data:
                 for j in range(nprocs):
                     skip = any(i is None for i in idx_global[j]) \
@@ -279,6 +278,16 @@ class Data(np.ndarray):
                 # * one of them is 1
                 # Conceptually, below we apply the same rule
                 val_idx = val_idx[len(val_idx)-val.ndim:]
+                processed = []
+                # Handle step size > 1
+                for i, j in zip(glb_idx, val_idx):
+                    if isinstance(i, slice) and i.step is not None and i.step > 1 and \
+                            j.stop > j.start:
+                        processed.append(slice(int(j.start/i.step),
+                                               int(j.stop/i.step), 1))
+                    else:
+                        processed.append(j)
+                val_idx = as_tuple(processed)
                 val = val[val_idx]
             else:
                 # `val` is replicated`, `self` is replicated -> plain ndarray.__setitem__
@@ -312,7 +321,8 @@ class Data(np.ndarray):
             return as_tuple(processed)
 
     def _process_args(self, idx, val):
-        if any(isinstance(i, slice) and i.step is not None and i.step < 0 for i in idx):
+        if any(isinstance(i, slice) and i.step is not None and i.step < 0
+               for i in as_tuple(idx)):
             processed = []
             transform = []
             for j in idx:

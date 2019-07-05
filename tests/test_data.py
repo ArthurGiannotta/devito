@@ -775,9 +775,32 @@ class TestDataDistributed(object):
                                                [0, 0, 0, 0, 0, 0],
                                                [0, 0, 0, 0, 0, 0]])
 
+        f.data[:] = 0
+        f.data[::2, ::2] = t.data[0, :, :]
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(np.array(f.data) == [[0, 0, 1, 0],
+                                               [0, 0, 0, 0],
+                                               [4, 0, 5, 0],
+                                               [0, 0, 0, 0]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(np.array(f.data) == [[2, 0, 3, 0],
+                                               [0, 0, 0, 0],
+                                               [6, 0, 7, 0],
+                                               [0, 0, 0, 0]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(np.array(f.data) == [[8, 0, 9, 0],
+                                               [0, 0, 0, 0],
+                                               [12, 0, 13, 0],
+                                               [0, 0, 0, 0]])
+        else:
+            assert np.all(np.array(f.data) == [[10, 0, 11, 0],
+                                               [0, 0, 0, 0],
+                                               [14, 0, 15, 0],
+                                               [0, 0, 0, 0]])       
+
         # Some additional required tests:
-        # g.data[::2, ::2] = f.data[:, :] etc
-        # g.data[::-2, ::-2] = f.data[:, :] etc
+        # FIXME: This still doesn't work
+        # f.data[6::-2, 6::-2] = t.data[0, :, :] etc
 
     @pytest.mark.parallel(mode=4)
     def test_indexing_in_views(self):
