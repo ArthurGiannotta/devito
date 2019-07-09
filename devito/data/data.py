@@ -3,6 +3,7 @@ from functools import wraps
 
 import numpy as np
 
+from devito.mpi import Distributor
 from devito.data.allocators import ALLOC_FLAT
 from devito.parameters import configuration
 from devito.tools import Tag, as_tuple, is_integer
@@ -238,6 +239,8 @@ class Data(np.ndarray):
                 glb_idx, val = self._process_args(glb_idx, val)
                 val_idx = as_tuple([slice(i.glb_min, i.glb_max+1, 1) for
                                     i in val._decomposition])
+                #val_idx = as_tuple([slice(i.loc_abs_min, i.loc_abs_max+1, 1) for
+                                    #i in val._decomposition])
                 idx = self._set_global_idx(val, glb_idx, val_idx)
                 comm = self._distributor.comm
                 nprocs = self._distributor.nprocs
@@ -280,14 +283,17 @@ class Data(np.ndarray):
                 val_idx = val_idx[len(val_idx)-val.ndim:]
                 processed = []
                 # Handle step size > 1
+                #from IPython import embed; embed()
                 for i, j in zip(glb_idx, val_idx):
                     if isinstance(i, slice) and i.step is not None and i.step > 1 and \
                             j.stop > j.start:
-                        processed.append(slice(int(j.start/i.step),
-                                               int(j.stop/i.step), 1))
+                        #processed.append(slice(int(j.start/i.step),
+                                               #int(j.stop/i.step), 1))
+                        processed.append(slice(j.start, j.stop, 1))
                     else:
                         processed.append(j)
                 val_idx = as_tuple(processed)
+                #from IPython import embed; embed()
                 val = val[val_idx]
             else:
                 # `val` is replicated`, `self` is replicated -> plain ndarray.__setitem__
@@ -325,20 +331,29 @@ class Data(np.ndarray):
                for i in as_tuple(idx)):
             processed = []
             transform = []
-            for j in idx:
+            for j, k in zip(idx, self._distributor.glb_shape):
                 if isinstance(j, slice) and j.step is not None and j.step < 0:
                     if j.start is None:
                         stop = None
                     else:
-                        stop = j.start + 1
-                    if j.stop is None:
-                        start = None
+                            stop = j.start + 1
+                    if j.stop is None and j.start is None:
+                        start = int(np.mod(k-1, -j.step))
+                    elif j.stop is None:
+                        start = int(np.mod(j.start, -j.step))
                     else:
                         start = j.stop + 1
                     processed.append(slice(start, stop, -j.step))
-                    transform.append(slice(None, None, j.step))
+                    transform.append(slice(None, None, np.sign(j.step)))
                 else:
                     processed.append(j)
+            # FIXME: Create a new data object: don't overwrite property
+            #if isinstance(val, Data):
+                #if len(transform) > 0 and len(val._distributor.shape) > len(val.shape):
+                    #val._distributor = Distributor(val.shape,
+                                                   #self._distributor.dimensions,
+                                                   #self._distributor.comm)
+                    ##raise NotImplementedError('Need to fix this')
             return as_tuple(processed), val[as_tuple(transform)]
         else:
             return idx, val
@@ -400,19 +415,34 @@ class Data(np.ndarray):
             else:
                 data_global_idx.append(None)
         mapped_idx = []
-        for i, j in zip(data_global_idx, as_tuple(idx)):
+        for i, j, k in zip(data_global_idx, as_tuple(idx), self._decomposition):
             if isinstance(j, slice) and j.start is None:
                 norm = 0
             elif isinstance(j, slice) and j.start is not None:
                 norm = j.start
             else:
                 norm = j
+            # FIXME: Simplify
+            if i is not None:
+                loc_max = k.loc_abs_max
+                if isinstance(j, slice) and j.step is not None:
+                    stop = j.step*i.stop+norm
+                else:
+                    stop = i.stop+norm
+                if stop > loc_max+1:
+                    #if isinstance(j, slice) and j.step is not None and j.step > 1:
+                        #stop = loc_max+1 - np.mod(j.step*i.stop+norm, loc_max+1)
+                    #else:
+                    stop = loc_max+1
             if i is not None:
                 if isinstance(j, slice) and j.step is not None:
+                    #mapped_idx.append(slice(j.step*i.start+norm,
+                                            #j.step*i.stop+norm, j.step))
                     mapped_idx.append(slice(j.step*i.start+norm,
-                                            j.step*i.stop+norm, j.step))
+                                            stop, j.step))
                 else:
-                    mapped_idx.append(slice(i.start+norm, i.stop+norm, i.step))
+                    #mapped_idx.append(slice(i.start+norm, i.stop+norm, i.step))
+                    mapped_idx.append(slice(i.start+norm, stop, i.step))
             else:
                 mapped_idx.append(None)
         return as_tuple(mapped_idx)
@@ -455,6 +485,7 @@ class Data(np.ndarray):
                 dat_len[rank_coords[j]] = as_tuple([0]*len(dat_len[rank_coords[j]]))
         # Work out the cumulative data shape
         dat_len_cum = np.zeros(topology, dtype=tuple)
+        #from IPython import embed; embed()
         for i in range(nprocs):
             my_coords = rank_coords[i]
             if i == 0:
@@ -472,6 +503,7 @@ class Data(np.ndarray):
                     c_dat = dat_len[my_coords][j]
                     n_dat.append(c_dat)
                 else:
+                    #from IPython import embed; embed()
                     c_dat = dat_len[my_coords][j]  # Current length
                     p_dat = dat_len[left_neighbours[j]][j]  # Previous length
                     n_dat.append(c_dat+p_dat)
