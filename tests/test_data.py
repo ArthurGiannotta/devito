@@ -821,28 +821,28 @@ class TestDataDistributed(object):
                                                [0, 0, 0, 0],
                                                [0, 14, 0, 15]])
 
-        #f.data[:] = 0
-        #f.data[6::-2, 6::-2] = t.data[0, :, :]
-        #if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
-            #assert np.all(np.array(f.data) == [[15, 0, 14, 0],
-                                               #[0, 0, 0, 0],
-                                               #[11, 0, 10, 0],
-                                               #[0, 0, 0, 0]])
-        #elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
-            #assert np.all(np.array(f.data) == [[13, 0, 12, 0],
-                                               #[0, 0, 0, 0],
-                                               #[9, 0, 8, 0],
-                                               #[0, 0, 0, 0]])
-        #elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
-            #assert np.all(np.array(f.data) == [[7, 0, 6, 0],
-                                               #[0, 0, 0, 0],
-                                               #[3, 0, 2, 0],
-                                               #[0, 0, 0, 0]])
-        #else:
-            #assert np.all(np.array(f.data) == [[5, 0, 4, 0],
-                                               #[0, 0, 0, 0],
-                                               #[1, 0, 0, 0],
-                                               #[0, 0, 0, 0]])
+        f.data[:] = 0
+        f.data[6::-2, 6::-2] = t.data[0, :, :]
+        if LEFT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(np.array(f.data) == [[15, 0, 14, 0],
+                                               [0, 0, 0, 0],
+                                               [11, 0, 10, 0],
+                                               [0, 0, 0, 0]])
+        elif LEFT in glb_pos_map[x] and RIGHT in glb_pos_map[y]:
+            assert np.all(np.array(f.data) == [[13, 0, 12, 0],
+                                               [0, 0, 0, 0],
+                                               [9, 0, 8, 0],
+                                               [0, 0, 0, 0]])
+        elif RIGHT in glb_pos_map[x] and LEFT in glb_pos_map[y]:
+            assert np.all(np.array(f.data) == [[7, 0, 6, 0],
+                                               [0, 0, 0, 0],
+                                               [3, 0, 2, 0],
+                                               [0, 0, 0, 0]])
+        else:
+            assert np.all(np.array(f.data) == [[5, 0, 4, 0],
+                                               [0, 0, 0, 0],
+                                               [1, 0, 0, 0],
+                                               [0, 0, 0, 0]])
 
     @pytest.mark.parallel(mode=4)
     def test_indexing_in_views(self):

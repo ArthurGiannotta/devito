@@ -380,6 +380,9 @@ class Distributor(AbstractDistributor):
             setattr(obj.value._obj, name, self.neighborhood[i])
         return obj
 
+    def create_new(self, shape, dimensions, comm):
+        return Distributor(shape, dimensions, comm)
+
 
 class SparseDistributor(AbstractDistributor):
 
