@@ -340,14 +340,20 @@ class Data(np.ndarray):
                     transform.append(slice(None, None, np.sign(j.step)))
                 else:
                     processed.append(j)
-            # FIXME: Create a new data object: don't overwrite property
-            if isinstance(val, Data):
-                if len(transform) > 0 and len(val._distributor.shape) > len(val.shape):
-                    val._distributor = \
-                        val._distributor.create_new(val.shape,
-                                                    self._distributor.dimensions,
-                                                    self._distributor.comm)
-            return as_tuple(processed), val[as_tuple(transform)]
+            if isinstance(val, Data) and len(transform) > 0 and \
+                    len(val._distributor.shape) > len(val.shape):
+                distributor = \
+                    val._distributor.create_new(val.shape,
+                                                self._distributor.dimensions,
+                                                self._distributor.comm)
+                new_val = Data(val.shape, val.dtype.type,
+                               decomposition=val._decomposition, modulo=val._modulo,
+                               distributor=distributor)
+                slc = as_tuple([slice(None, None, 1) for j in transform])
+                new_val[slc] = val[slc]
+                return as_tuple(processed), new_val[as_tuple(transform)]
+            else:
+                return as_tuple(processed), val[as_tuple(transform)]
         else:
             return idx, val
 
