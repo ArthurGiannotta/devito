@@ -1,4 +1,4 @@
-from collections import Counter
+from collections import Counter, OrderedDict
 from itertools import groupby
 
 import sympy
@@ -304,21 +304,21 @@ class Lift(Queue):
             return clusters
 
         # Now check data dependences
-        lifted = []
+        lifted = OrderedDict()
         processed = []
         for c in clusters:
-            impacted = set(clusters) - {c}
+            impacted = set(clusters) - ({c} | set(lifted))
             if c in candidates and\
                     not any(set(c.functions) & set(i.scope.writes) for i in impacted):
                 # Perform lifting, which requires contracting the iteration space
                 key = lambda d: d not in hope_invariant
                 ispace = c.ispace.project(key)
                 dspace = c.dspace.project(key)
-                lifted.append(Cluster(c.exprs, ispace, dspace, guards=c.guards))
+                lifted[c] = Cluster(c.exprs, ispace, dspace, guards=c.guards)
             else:
                 processed.append(c)
 
-        return lifted + processed
+        return list(lifted.values()) + processed
 
 
 def fuse(clusters):
