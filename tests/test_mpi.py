@@ -1011,6 +1011,27 @@ class TestOperatorAdvanced(object):
 
         assert np.all(sf.data == [1.5, 2.5, 2.5, 3.5][grid.distributor.myrank])
 
+    def test_haloupdate_mixed_fd_interpolate(self):
+        """
+        TODO.
+        """
+        grid = Grid((50, 50))
+        x, y = grid.dimensions
+        t = grid.stepping_dim
+
+        a = Function(name="a", grid=grid, space_order=8)
+        e = TimeFunction(name="e", grid=grid, space_order=8, time_order=2)
+        sf = SparseTimeFunction(name="sf", grid=grid, npoint=1, nt=5)
+
+        df = DefaultDimension(name="df", default_value=2)
+
+        eq = Eq(e.forward, e + e.dx + e.dy)
+
+        op = Operator([eq] + sf.interpolate(expr=e) + [Eq(e.forward.subs({y: df - 1}), e.forward.subs({y: df + 1}))])
+        op()
+
+        assert False
+
     @pytest.mark.parallel(mode=2)
     def test_subsampling(self):
         grid = Grid(shape=(40,))
