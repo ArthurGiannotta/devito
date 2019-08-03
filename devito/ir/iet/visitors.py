@@ -205,6 +205,13 @@ class CGen(Visitor):
     def visit_Section(self, o):
         header = c.Comment("Begin %s" % o.name)
         body = flatten(self._visit(i) for i in o.children)
+        if o._niter != 1:
+            loop_init = 'unsigned int iter_i = 0'
+            loop_cond = 'iter_i < %s' % (str(o._niter))
+            loop_inc = '++iter_i'
+            
+            body = [c.For(loop_init, loop_cond, loop_inc, c.Block(body))]
+
         footer = c.Comment("End %s" % o.name)
         return c.Module([header] + body + [footer])
 

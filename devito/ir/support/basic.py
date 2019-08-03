@@ -596,7 +596,7 @@ class Scope(object):
 
     def __init__(self, exprs):
         """
-        A Scope represents a group of TimedAcces objects extracted
+        A Scope represents a group of TimedAccess objects extracted
         from some IREq ``exprs``. The expressions must be provided
         in program order.
         """

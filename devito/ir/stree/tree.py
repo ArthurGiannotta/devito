@@ -31,6 +31,9 @@ class NodeSection(ScheduleTree):
 
     is_Section = True
 
+    def __init__(self, niter):
+        self._niter = niter
+
     @property
     def __repr_render__(self):
         return "<S>"

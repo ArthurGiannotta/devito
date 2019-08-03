@@ -56,7 +56,7 @@ def iet_make(stree):
                              direction=i.direction, uindices=uindices)
 
         elif i.is_Section:
-            body = Section('section%d' % nsections, body=queues.pop(i))
+            body = Section('section%d' % nsections, body=queues.pop(i), niter=i._niter)
             nsections += 1
 
         elif i.is_Halo:

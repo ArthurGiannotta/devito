@@ -128,10 +128,11 @@ def st_section(stree):
     """
 
     class Section(object):
-        def __init__(self, node):
+        def __init__(self, node, niter):
             self.parent = node.parent
             self.dim = node.dim
             self.nodes = [node]
+            self._niter = niter
 
         def is_compatible(self, node):
             return self.parent == node.parent and self.dim.root == node.dim.root
@@ -148,13 +149,19 @@ def st_section(stree):
             elif not n.is_Iteration or n.dim.is_Time:
                 section = None
             elif section is None or not section.is_compatible(n):
-                section = Section(n)
+                niter=1
+                for c in n.visit():
+                    if c.is_Exprs:
+                        for e in c.exprs:
+                            niter = max(niter, e._niter)
+
+                section = Section(n, niter)
                 sections.append(section)
             else:
                 section.nodes.append(n)
 
     # Transform the schedule tree by adding in sections
     for i in sections:
-        insert(NodeSection(), i.parent, i.nodes)
+        insert(NodeSection(i._niter), i.parent, i.nodes)
 
     return stree

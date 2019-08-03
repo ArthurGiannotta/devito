@@ -1179,6 +1179,10 @@ class TimeFunction(Function):
     _time_position = 0
     """Position of time index among the function indices."""
 
+    _x_position = 1
+    _y_position = 2
+    """Position of the spatial x and y indexes among the function indices."""
+
     def __init__(self, *args, **kwargs):
         if not self._cached():
             self.time_dim = kwargs.get('time_dim', self.indices[self._time_position])
@@ -1258,6 +1262,15 @@ class TimeFunction(Function):
         _t = self.indices[self._time_position]
 
         return self.subs(_t, _t - i * _t.spacing)
+    
+    @property
+    def backwardY(self):
+        """
+        Symbol for the space-backward state of the TimeFunction for the second dimension.
+        """
+        _y = self.indices[self._y_position]
+
+        return self.subs(_y, _y - _y.spacing)
 
     @property
     def _time_size(self):

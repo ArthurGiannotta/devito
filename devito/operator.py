@@ -20,7 +20,8 @@ from devito.profiling import create_profile
 from devito.symbolics import indexify
 from devito.tools import (Signer, ReducerMap, as_tuple, flatten, filter_ordered,
                           filter_sorted, split)
-from devito.types import Dimension
+from devito.types import Dimension, TimeFunction
+from devito.implicit import JacobiFunction
 
 __all__ = ['Operator']
 
@@ -157,6 +158,38 @@ class Operator(Callable):
 
         # Form and gather any required implicit expressions
         expressions = self._add_implicit(expressions)
+
+        # Process implicit terms in the left hand side
+        self._temporaries = []
+        equations = expressions
+        expressions = []
+
+        for e in equations:
+            if e.lhs.is_Add:
+                func = next(iter(e.lhs._functions))
+
+                temp_index = str(len(self._temporaries))
+                
+                dims = [func.dimensions[0]]
+                rhs_subs = e.rhs
+
+                for i in range(1, len(func.dimensions)):
+                    dim = func.dimensions[i]
+                    dims += [Dimension('tempdim_' + dim.name + temp_index)]
+                    rhs_subs = rhs_subs.subs(func.dimensions[i], dims[i])
+
+                temp = TimeFunction(name = 'temp_' + temp_index, shape = func.shape, 
+                                dimensions = dims)
+                self._temporaries += [temp]
+
+                temp_subs = temp
+                for i in range(1, len(func.dimensions)):
+                    temp_subs = temp_subs.subs(dims[i], func.dimensions[i])
+
+                expressions += [Eq(temp, rhs_subs)] # This equations calculates the b coeff
+                expressions += [Eq(func.forward, JacobiFunction(func.forward, e.lhs, temp_subs), niter=100)] # This equation applies the Jacobi method
+            else:
+                expressions += [e]
 
         # Expression lowering: evaluation of derivatives, indexification,
         # substitution rules, specialization
