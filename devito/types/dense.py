@@ -1277,12 +1277,42 @@ class TimeFunction(Function):
         return self.subs(_t, _t + i * _t.spacing)
 
     @property
+    def forwardX(self):
+        """
+        Symbol for the space-forward state of the TimeFunction for the first dimension (X).
+        """
+
+        _x = self.indices[self._x_position]
+
+        return self.subs(_x, _x + _x.spacing)
+
+    @property
+    def forwardY(self):
+        """
+        Symbol for the space-forward state of the TimeFunction for the second dimension (Y).
+        """
+
+        _y = self.indices[self._y_position]
+
+        return self.subs(_y, _y + _y.spacing)
+
+    @property
     def backward(self):
         """Symbol for the time-backward state of the TimeFunction."""
         i = int(self.time_order / 2) if self.time_order >= 2 else 1
         _t = self.dimensions[self._time_position]
 
         return self.subs(_t, _t - i * _t.spacing)
+
+    @property
+    def backwardX(self):
+        """
+        Symbol for the space-backward state of the TimeFunction for the first dimension (X).
+        """
+
+        _x = self.indices[self._x_position]
+
+        return self.subs(_x, _x - _x.spacing)
 
     @property
     def backwardY(self):

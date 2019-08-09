@@ -18,8 +18,8 @@ class IterativeMethod(Enum):
     SUCCESSIVE_OVER_RELAXATION = SOR
 
     @static_vars(constants=dict())
-    def set_constant(name, value):
-        constants[name] = value
+    def set_constant(self, name, value):
+        IterativeMethod.set_constant.constants[name] = value
 
     @static_vars(temporaries=[])
     def explicit_expressions(self, equation):
@@ -50,14 +50,16 @@ class IterativeMethod(Enum):
             orig_to_temp_subs += [(dimension, temp_dimension)]
             temp_to_orig_subs += [(temp_dimension, dimension)]
 
-        if self.value == self.GAUSS_SEIDEL.value:
+        if self.value == self.GAUSS_SEIDEL.value or self.value == self.SOR.value:
             temp = TimeFunction(name = 'temp_' + temp_index, shape = function.shape, 
                                 dimensions = temp_dims)
             IterativeMethod.explicit_expressions.temporaries += [temp]
 
             temp_subs = temp.subs(temp_to_orig_subs)
-            gauss_seidel = solve((equation.lhs - temp_subs).evaluate, function.forward)[0]
+            gauss_seidel = solve((equation.lhs - temp_subs).evaluate, function.forward,
+                                rational = False, simplify = False)[0]
 
+        if self.value == self.GAUSS_SEIDEL.value:
             # This expression calculates the b coefficients
             expr1 = Eq(temp_subs, equation.rhs)
 
@@ -67,14 +69,7 @@ class IterativeMethod(Enum):
 
             return [expr1, expr2]
         elif self.value == self.SOR.value:
-            temp = TimeFunction(name = 'temp_' + temp_index, shape = function.shape, 
-                                dimensions = temp_dims)
-            IterativeMethod.explicit_expressions.temporaries += [temp]
-
             omega = IterativeMethod.set_constant.constants.get('omega', 1.2)
-
-            temp_subs = temp.subs(temp_to_orig_subs)
-            gauss_seidel = solve((equation.lhs - temp_subs).evaluate, function.forward)[0]
             sor = omega * gauss_seidel + (1 - omega) * function.forward
 
             # This expression calculates the b coefficients
