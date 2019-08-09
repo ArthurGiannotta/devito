@@ -1,6 +1,7 @@
 import numpy as np
 from argparse import ArgumentParser
 
+from devito import configuration
 from devito.logger import info
 from examples.seismic.elastic import ElasticWaveSolver
 from examples.seismic import demo_model, AcquisitionGeometry
@@ -45,13 +46,21 @@ def run(shape=(50, 50), spacing=(20.0, 20.0), tn=1000.0,
     return rec1, rec2, vx, vz, txx, tzz, txz, summary
 
 
+def test_elastic():
+    rec1, rec2, vx, vz, txx, tzz, txz, summary = run()
+    norm = lambda x: np.linalg.norm(x.data.reshape(-1))
+    assert np.isclose(norm(rec1), 20.9175, atol=1e-3, rtol=0)
+    assert np.isclose(norm(rec2), 1.81198, atol=1e-3, rtol=0)
+
+
 if __name__ == "__main__":
     description = ("Example script for a set of elastic operators.")
     parser = ArgumentParser(description=description)
     parser.add_argument('--2d', dest='dim2', default=False, action='store_true',
                         help="Preset to determine the physical problem setup")
-    parser.add_argument('-a', '--autotune', default=False, action='store_true',
-                        help="Enable autotuning for block sizes")
+    parser.add_argument('-a', '--autotune', default='off',
+                        choices=(configuration._accepted['autotuning']),
+                        help="Operator auto-tuning mode")
     parser.add_argument("-so", "--space_order", default=4,
                         type=int, help="Space order of the simulation")
     parser.add_argument("--nbpml", default=40,

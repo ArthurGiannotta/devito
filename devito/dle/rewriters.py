@@ -8,14 +8,13 @@ import cgen
 from devito.dle.blocking_utils import Blocker, BlockDimension
 from devito.dle.parallelizer import Ompizer
 from devito.exceptions import DLEException
-from devito.ir.iet import (Call, Expression, Iteration, List, HaloSpot, Prodder,
+from devito.ir.iet import (Call, Iteration, List, HaloSpot, Prodder, PARALLEL,
                            FindSymbols, FindNodes, FindAdjacent, MapNodes, Transformer,
-                           compose_nodes, filter_iterations, retrieve_iteration_tree)
-from devito.logger import perf_adv
+                           filter_iterations, retrieve_iteration_tree)
+from devito.logger import perf_adv, dle_warning as warning
 from devito.mpi import HaloExchangeBuilder, HaloScheme
 from devito.parameters import configuration
-from devito.symbolics import ccode
-from devito.tools import DAG, as_tuple, filter_ordered
+from devito.tools import DAG, as_tuple, filter_ordered, generator
 
 __all__ = ['PlatformRewriter', 'CPU64Rewriter', 'Intel64Rewriter', 'PowerRewriter',
            'ArmRewriter', 'SpeculativeRewriter', 'DeviceOffloadingRewriter',
@@ -129,18 +128,9 @@ class AbstractRewriter(object):
 
     __metaclass__ = abc.ABCMeta
 
-    _node_parallelizer_type = None
-    """The local-node IET parallelizer. To be specified by subclasses."""
-
     def __init__(self, params, platform):
         self.params = params
         self.platform = platform
-
-        # Iteration blocker (i.e., for "loop blocking")
-        self._node_blocker = Blocker(params.get('blockinner'), params.get('blockalways'))
-
-        # Shared-memory parallelizer
-        self._node_parallelizer = self._node_parallelizer_type()
 
     def run(self, iet):
         """The optimization pipeline, as a sequence of AST transformation passes."""
@@ -164,6 +154,28 @@ class PlatformRewriter(AbstractRewriter):
     Collection of backend-compiler-specific pragmas.
     """
 
+    _node_parallelizer_type = None
+    """The local-node IET parallelizer. To be specified by subclasses."""
+
+    _default_blocking_levels = 1
+    """
+    Depth of the loop blocking hierarchy. 1 => "blocks", 2 => "blocks" and "sub-blocks",
+    3 => "blocks", "sub-blocks", and "sub-sub-blocks", ...
+    """
+
+    def __init__(self, params, platform):
+        super(PlatformRewriter, self).__init__(params, platform)
+
+        # Iteration blocker (i.e., for "loop blocking")
+        self._node_blocker = Blocker(
+            params.get('blockinner'),
+            params.get('blockalways'),
+            params.get('blocklevels') or self._default_blocking_levels
+        )
+
+        # Shared-memory parallelizer
+        self._node_parallelizer = self._node_parallelizer_type()
+
     def _pipeline(self, state):
         return
 
@@ -184,7 +196,7 @@ class PlatformRewriter(AbstractRewriter):
     @dle_pass
     def _loop_wrapping(self, iet):
         """
-        Emit a performance warning if WRAPPABLE Iterations are found,
+        Emit a performance message if WRAPPABLE Iterations are found,
         as these are a symptom that unnecessary memory is being allocated.
         """
         for i in FindNodes(Iteration).visit(iet):
@@ -199,36 +211,71 @@ class PlatformRewriter(AbstractRewriter):
         """
         Optimize the HaloSpots in ``iet``.
 
-        * Remove all USELESS HaloSpots;
-        * Merge all hoistable HaloSpots with their root HaloSpot, thus
+        * Remove all ``useless`` HaloSpots;
+        * Merge all ``hoistable`` HaloSpots with their root HaloSpot, thus
           removing redundant communications and anticipating communications
           that will be required by later Iterations.
         """
-        # Drop USELESS HaloSpots
-        mapper = {hs: hs.body for hs in FindNodes(HaloSpot).visit(iet) if hs.is_Useless}
+        # Drop `useless` HaloSpots
+        mapper = {hs: hs._rebuild(halo_scheme=hs.halo_scheme.drop(hs.useless))
+                  for hs in FindNodes(HaloSpot).visit(iet)}
         iet = Transformer(mapper, nested=True).visit(iet)
 
         # Handle `hoistable` HaloSpots
+        # First, we merge `hoistable` HaloSpots together, to anticipate communications
         mapper = {}
-        for halo_spots in MapNodes(Iteration, HaloSpot).visit(iet).values():
+        for tree in retrieve_iteration_tree(iet):
+            halo_spots = FindNodes(HaloSpot).visit(tree.root)
+            if not halo_spots:
+                continue
             root = halo_spots[0]
-
+            if root in mapper:
+                continue
             hss = [root.halo_scheme]
             hss.extend([hs.halo_scheme.project(hs.hoistable) for hs in halo_spots[1:]])
-
-            mapper[root] = root._rebuild(halo_scheme=HaloScheme.union(hss))
-            mapper.update({hs: hs._rebuild(halo_scheme=hs.halo_scheme.drop(hs.hoistable))
-                           for hs in halo_spots[1:]})
+            try:
+                mapper[root] = root._rebuild(halo_scheme=HaloScheme.union(hss))
+            except ValueError:
+                # HaloSpots have non-matching `loc_indices` and therefore can't be merged
+                warning("Found hoistable HaloSpots with disjoint loc_indices, "
+                        "skipping optimization")
+                continue
+            for hs in halo_spots[1:]:
+                halo_scheme = hs.halo_scheme.drop(hs.hoistable)
+                if halo_scheme.is_void:
+                    mapper[hs] = hs.body
+                else:
+                    mapper[hs] = hs._rebuild(halo_scheme=halo_scheme)
         iet = Transformer(mapper, nested=True).visit(iet)
 
-        # At this point, some HaloSpots may have become empty (i.e., requiring
-        # no communications), hence they can be removed
+        # Then, we make sure the halo exchanges get performed *before*
+        # the first distributed Dimension. Again, we do this to anticipate
+        # communications, which hopefully has a pay off in performance
         #
-        # <HaloSpot(u,v)>           HaloSpot(u,v)
-        #   <A>                       <A>
-        # <HaloSpot()>      ---->   <B>
-        #   <B>
-        mapper = {i: i.body for i in FindNodes(HaloSpot).visit(iet) if i.is_empty}
+        # <Iteration x>                    <HaloSpot(u)>, in y
+        #   <HaloSpot(u)>, in y    ---->   <Iteration x>
+        #   <Iteration y>                    <Iteration y>
+        mapper = {}
+        for i, halo_spots in MapNodes(Iteration, HaloSpot).visit(iet).items():
+            hoistable = [hs for hs in halo_spots if hs.hoistable]
+            if not hoistable:
+                continue
+            elif len(hoistable) > 1:
+                # We should never end up here, but for now we can't prove it formally
+                warning("Found multiple hoistable HaloSpots, skipping optimization")
+                continue
+            hs = hoistable.pop()
+            if hs in mapper:
+                continue
+            if i.dim.root in hs.dimensions:
+                halo_scheme = hs.halo_scheme.drop(hs.hoistable)
+                if halo_scheme.is_void:
+                    mapper[hs] = hs.body
+                else:
+                    mapper[hs] = hs._rebuild(halo_scheme=halo_scheme)
+
+                halo_scheme = hs.halo_scheme.project(hs.hoistable)
+                mapper[i] = hs._rebuild(halo_scheme=halo_scheme, body=i._rebuild())
         iet = Transformer(mapper, nested=True).visit(iet)
 
         # Finally, we try to move HaloSpot-free Iteration nests within HaloSpot
@@ -265,7 +312,7 @@ class PlatformRewriter(AbstractRewriter):
     @dle_pass
     def _loop_blocking(self, iet):
         """
-        Apply loop blocking to PARALLEL Iteration trees.
+        Apply hierarchical loop blocking to PARALLEL Iteration trees.
         """
         return self._node_blocker.make_blocking(iet)
 
@@ -275,14 +322,30 @@ class PlatformRewriter(AbstractRewriter):
         Add MPI routines performing halo exchanges to emit distributed-memory
         parallel code.
         """
-        sync_heb = HaloExchangeBuilder('basic')
-        user_heb = HaloExchangeBuilder(self.params['mpi'])
+        # To produce unique object names
+        generators = {'msg': generator(), 'comm': generator(), 'comp': generator()}
+        sync_heb = HaloExchangeBuilder('basic', **generators)
+        user_heb = HaloExchangeBuilder(self.params['mpi'], **generators)
         mapper = {}
-        for i, hs in enumerate(FindNodes(HaloSpot).visit(iet)):
+        for hs in FindNodes(HaloSpot).visit(iet):
             heb = user_heb if hs.is_Overlappable else sync_heb
-            mapper[hs] = heb.make(hs, i)
+            mapper[hs] = heb.make(hs)
         efuncs = sync_heb.efuncs + user_heb.efuncs
         objs = sync_heb.objs + user_heb.objs
+        iet = Transformer(mapper, nested=True).visit(iet)
+
+        # Must drop the PARALLEL tag from the Iterations within which halo
+        # exchanges are performed
+        mapper = {}
+        for tree in retrieve_iteration_tree(iet):
+            for i in reversed(tree):
+                if i in mapper:
+                    # Already seen this subtree, skip
+                    break
+                if FindNodes(Call).visit(i):
+                    mapper.update({n: n._rebuild(properties=set(n.properties)-{PARALLEL})
+                                   for n in tree[:tree.index(i)+1]})
+                    break
         iet = Transformer(mapper, nested=True).visit(iet)
 
         return iet, {'includes': ['mpi.h'], 'efuncs': efuncs, 'args': objs}
@@ -322,6 +385,34 @@ class PlatformRewriter(AbstractRewriter):
         return self._node_parallelizer.make_parallel(iet)
 
     @dle_pass
+    def _minimize_remainders(self, iet):
+        """
+        Adjust ROUNDABLE Iteration bounds so as to avoid the insertion of remainder
+        loops by the backend compiler.
+        """
+        roundable = [i for i in FindNodes(Iteration).visit(iet) if i.is_Roundable]
+
+        mapper = {}
+        for i in roundable:
+            functions = FindSymbols().visit(i)
+
+            # Get the SIMD vector length
+            dtypes = {f.dtype for f in functions if f.is_Tensor}
+            assert len(dtypes) == 1
+            vl = configuration['platform'].simd_items_per_reg(dtypes.pop())
+
+            # Round up `i`'s max point so that at runtime only vector iterations
+            # will be performed (i.e., remainder loops won't be necessary)
+            m, M, step = i.limits
+            limits = (m, M + (i.symbolic_size % vl), step)
+
+            mapper[i] = i._rebuild(limits=limits)
+
+        iet = Transformer(mapper).visit(iet)
+
+        return iet, {}
+
+    @dle_pass
     def _hoist_prodders(self, iet):
         """
         Move Prodders within the outer levels of an Iteration tree.
@@ -358,6 +449,7 @@ class CPU64Rewriter(PlatformRewriter):
         self._simdize(state)
         if self.params['openmp']:
             self._node_parallelize(state)
+        self._minimize_remainders(state)
         self._hoist_prodders(state)
 
 
@@ -452,72 +544,6 @@ class SpeculativeRewriter(CPU64Rewriter):
                 if i.is_Vectorizable:
                     mapper[i] = List(header=pragma, body=i)
         processed = Transformer(mapper).visit(processed)
-
-        return processed, {}
-
-    @dle_pass
-    def _minimize_remainders(self, iet):
-        """
-        Reshape temporary tensors and adjust loop trip counts to prevent as many
-        compiler-generated remainder loops as possible.
-        """
-        # The innermost dimension is the one that might get padded
-        p_dim = -1
-
-        mapper = {}
-        for tree in retrieve_iteration_tree(iet):
-            vector_iterations = [i for i in tree if i.is_Vectorizable]
-            if not vector_iterations or len(vector_iterations) > 1:
-                continue
-            root = vector_iterations[0]
-
-            # Padding
-            writes = [i.write for i in FindNodes(Expression).visit(root)
-                      if i.write.is_Array]
-            padding = []
-            for i in writes:
-                try:
-                    simd_items = self.platform.simd_items_per_reg(i.dtype)
-                except KeyError:
-                    return iet, {}
-                padding.append(simd_items - i.shape[-1] % simd_items)
-            if len(set(padding)) == 1:
-                padding = padding[0]
-                for i in writes:
-                    padded = (i._padding[p_dim][0], i._padding[p_dim][1] + padding)
-                    i.update(padding=i._padding[:p_dim] + (padded,))
-            else:
-                # Padding must be uniform -- not the case, so giving up
-                continue
-
-            # Dynamic trip count adjustment
-            endpoint = root.symbolic_max
-            if not endpoint.is_Symbol:
-                continue
-            condition = []
-            externals = set(i.symbolic_shape[-1] for i in FindSymbols().visit(root)
-                            if i.is_Tensor)
-            for i in root.uindices:
-                for j in externals:
-                    condition.append(root.symbolic_max + padding < j)
-            condition = ' && '.join(ccode(i) for i in condition)
-            endpoint_padded = endpoint.func('_%s' % endpoint.name)
-            init = cgen.Initializer(
-                cgen.Value("const int", endpoint_padded),
-                cgen.Line('(%s) ? %s : %s' % (condition,
-                                              ccode(endpoint + padding),
-                                              endpoint))
-            )
-
-            # Update the Iteration bound
-            limits = list(root.limits)
-            limits[1] = endpoint_padded.func(endpoint_padded.name)
-            rebuilt = list(tree)
-            rebuilt[rebuilt.index(root)] = root._rebuild(limits=limits)
-
-            mapper[tree[0]] = List(header=init, body=compose_nodes(rebuilt))
-
-        processed = Transformer(mapper).visit(iet)
 
         return processed, {}
 

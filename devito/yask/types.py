@@ -71,6 +71,10 @@ class Function(dense.Function, Signer):
             newobj = cls.__base__.__new__(klass, *args, **kwargs)
         return newobj
 
+    def __padding_setup__(self, **kwargs):
+        # YASK calculates the padding, so we bypass the dense.Function's autopadding
+        return tuple((0, 0) for i in range(self.ndim))
+
     def _allocate_memory(func):
         """Allocate memory in terms of YASK vars."""
         def wrapper(self):
@@ -125,13 +129,13 @@ class Function(dense.Function, Signer):
     @property
     def data(self):
         """
-        The domain data values, as a :class:`Data`.
+        The domain data values, as a Data.
 
-        The returned object, which behaves as a :class:`numpy.ndarray`, provides
+        The returned object, which behaves as a `numpy.ndarray`, provides
         a *view* of the actual data, in row-major format. Internally, the data is
         stored in whatever layout adopted by YASK.
 
-        Any read/write from/to the returned :class:`Data` should be performed
+        Any read/write from/to the returned Data should be performed
         assuming a row-major storage layout; behind the scenes, these accesses
         are automatically translated into whatever YASK expects, in order to pick
         the intended values.

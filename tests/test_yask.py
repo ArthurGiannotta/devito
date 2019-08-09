@@ -272,7 +272,7 @@ class TestOperatorSimple(object):
 
     def test_constants(self):
         """
-        Check that :class:`Constant` objects are treated correctly.
+        Check that Constant objects are treated correctly.
         """
         grid = Grid(shape=(4, 4, 4))
         c = Constant(name='c', value=2., dtype=grid.dtype)
@@ -296,7 +296,7 @@ class TestOperatorSimple(object):
 
     def test_partial_offloading(self):
         """
-        Check that :class:`Function` objects not using any :class:`SpaceDimension`
+        Check that Function objects not using any SpaceDimension
         are computed in Devito-land, rather than via YASK.
         """
         shape = (4, 4, 4)
@@ -366,8 +366,7 @@ class TestOperatorAdvanced(object):
 
     def test_misc_dims(self):
         """
-        Tests grid-independent :class:`Function`s, which require YASK's "misc"
-        dimensions.
+        Tests grid-independent Functions, which require YASK's "misc" dimensions.
         """
         dx = Dimension(name='dx')
         grid = Grid(shape=(10, 10))
@@ -485,6 +484,10 @@ class TestIsotropicAcoustic(object):
         return self.model.m
 
     @cached_property
+    def vp(self):
+        return self.model.vp
+
+    @cached_property
     def damp(self):
         return self.model.damp
 
@@ -535,7 +538,7 @@ class TestIsotropicAcoustic(object):
         op = Operator(self.eqn, subs=self.model.spacing_map)
         assert 'run_solution' in str(op)
 
-        op.apply(u=self.u, m=self.m, damp=self.damp, time=10, dt=dt)
+        op.apply(u=self.u, vp=self.vp, damp=self.damp, time=10, dt=dt)
 
         assert np.linalg.norm(self.u.data[:]) == 0.0
 
@@ -551,7 +554,7 @@ class TestIsotropicAcoustic(object):
         op = Operator(eqns, subs=self.model.spacing_map)
         assert 'run_solution' in str(op)
 
-        op.apply(u=self.u, m=self.m, damp=self.damp, src=self.src, dt=dt)
+        op.apply(u=self.u, vp=self.vp, damp=self.damp, src=self.src, dt=dt)
 
         exp_u = 154.05
         assert np.isclose(np.linalg.norm(self.u.data[:]), exp_u, atol=exp_u*1.e-2)
@@ -569,7 +572,7 @@ class TestIsotropicAcoustic(object):
         op = Operator(eqns, subs=self.model.spacing_map)
         assert 'run_solution' in str(op)
 
-        op.apply(u=self.u, m=self.m, damp=self.damp, src=self.src, rec=self.rec, dt=dt)
+        op.apply(u=self.u, vp=self.vp, damp=self.damp, src=self.src, rec=self.rec, dt=dt)
 
         # The expected norms have been computed "by hand" looking at the output
         # of test_adjointA's forward operator w/o using the YASK backend.

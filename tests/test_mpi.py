@@ -5,7 +5,7 @@ from unittest.mock import patch
 from conftest import skipif
 from devito import (Grid, Constant, Function, TimeFunction, SparseFunction,
                     SparseTimeFunction, Dimension, ConditionalDimension,
-                    SubDimension, Eq, Inc, Operator, norm, inner, switchconfig)
+                    SubDimension, Eq, Inc, NODE, Operator, norm, inner, switchconfig)
 from devito.data import LEFT, RIGHT
 from devito.ir.iet import Call, Conditional, Iteration, FindNodes, retrieve_iteration_tree
 from devito.mpi import MPI
@@ -593,6 +593,7 @@ class TestOperatorSimple(object):
 
 class TestCodeGeneration(object):
 
+    @pytest.mark.parallel(mode=1)
     def test_avoid_haloupdate_as_nostencil_basic(self):
         grid = Grid(shape=(12,))
 
@@ -605,6 +606,7 @@ class TestCodeGeneration(object):
         calls = FindNodes(Call).visit(op)
         assert len(calls) == 0
 
+    @pytest.mark.parallel(mode=1)
     def test_avoid_haloupdate_as_nostencil_advanced(self):
         grid = Grid(shape=(4, 4))
         u = TimeFunction(name='u', grid=grid, space_order=4, time_order=2, save=None)
@@ -694,6 +696,20 @@ class TestCodeGeneration(object):
         assert len(calls) == 1
 
     @pytest.mark.parallel(mode=1)
+    def test_avoid_haloupdate_with_constant_index(self):
+        grid = Grid(shape=(4,))
+        x = grid.dimensions[0]
+        t = grid.stepping_dim
+
+        u = TimeFunction(name='u', grid=grid)
+
+        eq = Eq(u.forward, u[t, 1] + u[t, 1 + x.symbolic_min] + u[t, x])
+        op = Operator(eq)
+
+        calls = FindNodes(Call).visit(op)
+        assert len(calls) == 0
+
+    @pytest.mark.parallel(mode=1)
     def test_hoist_haloupdate_if_no_flowdep(self):
         grid = Grid(shape=(12,))
         x = grid.dimensions[0]
@@ -718,23 +734,6 @@ class TestCodeGeneration(object):
 
         calls = FindNodes(Call).visit(op)
         assert len(calls) == 2
-
-    @pytest.mark.parallel(mode=1)
-    def test_stencil_nowrite_implies_haloupdate_anyway(self):
-        grid = Grid(shape=(12,))
-        x = grid.dimensions[0]
-        t = grid.stepping_dim
-
-        f = TimeFunction(name='f', grid=grid)
-        g = Function(name='g', grid=grid)
-
-        # It does a halo update, even though there's no data dependence,
-        # because when the halo updates are placed, the compiler conservatively
-        # assumes there might have been another equation writing to `f` before.
-        op = Operator(Eq(g, f[t, x-1] + f[t, x+1] + 1.))
-
-        calls = FindNodes(Call).visit(op)
-        assert len(calls) == 1
 
     @pytest.mark.parallel(mode=[(2, 'basic'), (2, 'diag')])
     def test_redo_haloupdate_due_to_antidep(self):
@@ -802,7 +801,7 @@ class TestCodeGeneration(object):
         assert len(tree.root.nodes) == 2
         call = tree.root.nodes[0]
         assert call.name == 'pokempi0'
-        assert call.arguments[0].name == 'msg0_0'
+        assert call.arguments[0].name == 'msg0'
 
         # Now we do as before, but enforcing loop blocking (by default off,
         # as heuristically it is not enabled when the Iteration nest has depth < 3)
@@ -815,7 +814,7 @@ class TestCodeGeneration(object):
         assert len(tree.root.nodes[0].nodes) == 2
         call = tree.root.nodes[0].nodes[0]
         assert call.name == 'pokempi0'
-        assert call.arguments[0].name == 'msg0_0'
+        assert call.arguments[0].name == 'msg0'
 
 
 class TestOperatorAdvanced(object):
@@ -1251,12 +1250,11 @@ class TestOperatorAdvanced(object):
         if not glb_pos_map[x] and not glb_pos_map[y]:
             assert np.all(u.data_ro_domain[1] == 3)
 
-    @pytest.mark.parallel(mode=[(4, 'basic'), (4, 'overlap'), (4, 'full')])
+    @pytest.mark.parallel(mode=[(4, 'basic'), (4, 'overlap'), (4, 'full', True)])
     def test_coupled_eqs_mixed_dims(self):
         """
-        Test MPI in an Operator that computes coupled equations over partly
-        disjoint sets of Dimensions (e.g., one Eq over [x, y, z], the other
-        Eq over [x, yi, zi]).
+        Test an Operator that computes coupled equations over partly disjoint sets
+        of Dimensions (e.g., one Eq over [x, y, z], the other Eq over [x, yi, zi]).
         """
         grid = Grid(shape=(4, 4))
         x, y = grid.dimensions
@@ -1301,7 +1299,30 @@ class TestOperatorAdvanced(object):
         assert np.all(v.data_ro_domain[1, :, 2] == 4.)
         assert np.all(v.data_ro_domain[1, :, 3] == 0.)
 
-    @pytest.mark.parallel(mode=[(4, 'basic'), (4, 'overlap2')])
+    @pytest.mark.parallel(mode=2)
+    def test_haloupdate_same_timestep(self):
+        """
+        Test an Operator that computes coupled equations in which the second
+        one requires a halo update right after the computation of the first one.
+        """
+        grid = Grid(shape=(8, 8))
+        x, y = grid.dimensions
+        t = grid.stepping_dim
+
+        u = TimeFunction(name='u', grid=grid)
+        u.data_with_halo[:] = 1.
+        v = TimeFunction(name='v', grid=grid)
+        v.data_with_halo[:] = 0.
+
+        eqns = [Eq(u.forward, u + v + 1.),
+                Eq(v.forward, u[t+1, x, y-1] + u[t+1, x, y] + u[t+1, x, y+1])]
+
+        op = Operator(eqns)
+        op.apply(time=0)
+
+        assert np.all(v.data_ro_domain[-1, :, 1:-1] == 6.)
+
+    @pytest.mark.parallel(mode=[(4, 'basic'), (4, 'overlap2', True)])
     @patch("devito.dse.rewriters.AdvancedRewriter.MIN_COST_ALIAS", 1)
     def test_aliases(self):
         """
@@ -1341,7 +1362,7 @@ class TestOperatorAdvanced(object):
 
         assert u0_norm == u1_norm
 
-    @pytest.mark.parallel(mode=[(4, 'overlap2')])
+    @pytest.mark.parallel(mode=[(4, 'overlap2', True)])
     @patch("devito.dse.rewriters.AdvancedRewriter.MIN_COST_ALIAS", 1)
     def test_aliases_with_shifted_diagonal_halo_touch(self):
         """
@@ -1373,6 +1394,36 @@ class TestOperatorAdvanced(object):
 
         assert u0_norm == u1_norm
 
+    @pytest.mark.parallel(mode=[(4, 'full', True)])
+    def test_staggering(self):
+        """
+        Test MPI in presence of staggered grids.
+
+        The equations are semantically meaningless, but they are designed to
+        generate the kind of loop nest structure which is typical of *-elastic
+        problems (e.g., visco-elastic).
+        """
+        grid = Grid(shape=(8, 8))
+        x, y = grid.dimensions
+
+        so = 2
+        ux = TimeFunction(name='ux', grid=grid, staggered=x, space_order=so)
+        uxx = TimeFunction(name='uxx', grid=grid, staggered=NODE, space_order=so)
+        uxy = TimeFunction(name='uxy', grid=grid, staggered=(x, y), space_order=so)
+
+        eqns = [Eq(ux.forward, ux + 0.2*uxx.dx + uxy.dy + 0.5),
+                Eq(uxx.forward, uxx + ux.forward.dx + ux.forward.dy + 1.),
+                Eq(uxy.forward, 40.*uxy + ux.forward.dx + ux.forward.dy + 3.)]
+
+        op = Operator(eqns)
+
+        op(time_M=2)
+
+        # Expected norms computed "manually" from sequential runs
+        assert np.isclose(norm(ux), 5408.574, rtol=1.e-4)
+        assert np.isclose(norm(uxx), 60904.192, rtol=1.e-4)
+        assert np.isclose(norm(uxy), 58555.359, rtol=1.e-4)
+
 
 class TestIsotropicAcoustic(object):
 
@@ -1395,8 +1446,8 @@ class TestIsotropicAcoustic(object):
         op_adj = solver.op_adj()
         adj_calls = FindNodes(Call).visit(op_adj)
 
-        assert len(fwd_calls) == 2
-        assert len(adj_calls) == 2
+        assert len(fwd_calls) == 1
+        assert len(adj_calls) == 1
 
     def run_adjoint_F(self, shape, kernel, space_order, nbpml, save,
                       Eu, Erec, Ev, Esrca):
@@ -1434,9 +1485,8 @@ class TestIsotropicAcoustic(object):
         ((60, 70), 'OT2', 8, 10, False, 351.217, 867.420, 405805.482, 239444.952),
         ((60, 70, 80), 'OT2', 12, 10, False, 153.122, 205.902, 27484.635, 11736.917)
     ])
-    @pytest.mark.parallel(mode=[(4, 'basic', True), (4, 'diag', True),
-                                (4, 'overlap', True), (4, 'overlap2', True),
-                                (4, 'full', True)])
+    @pytest.mark.parallel(mode=[(4, 'basic'), (4, 'diag', True), (4, 'overlap', True),
+                                (4, 'overlap2', True), (4, 'full', True)])
     def test_adjoint_F(self, shape, kernel, space_order, nbpml, save,
                        Eu, Erec, Ev, Esrca):
         self.run_adjoint_F(shape, kernel, space_order, nbpml, save, Eu, Erec, Ev, Esrca)
@@ -1444,7 +1494,7 @@ class TestIsotropicAcoustic(object):
     @pytest.mark.parametrize('shape,kernel,space_order,nbpml,save,Eu,Erec,Ev,Esrca', [
         ((60, 70, 80), 'OT2', 12, 10, False, 153.122, 205.902, 27484.635, 11736.917)
     ])
-    @pytest.mark.parallel(mode=[(8, 'diag'), (8, 'full')])
+    @pytest.mark.parallel(mode=[(8, 'diag', True), (8, 'full', True)])
     @switchconfig(openmp=False)
     def test_adjoint_F_no_omp(self, shape, kernel, space_order, nbpml, save,
                               Eu, Erec, Ev, Esrca):

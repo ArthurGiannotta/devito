@@ -100,9 +100,9 @@ def st_make_halo(stree):
             spot = k
             ancestors = [n for n in k.ancestors if n.is_Iteration]
             for n in ancestors:
-                test0 = any(n.dim is i.dim for i in v.halos)
-                test1 = n.dim not in [i.root for i in v.loc_indices]
-                if test0 or test1:
+                # Place the halo exchange right before the first
+                # distributed Dimension which requires it
+                if any(n.dim is i.dim for i in v.halos):
                     spot = n
                     break
             mapper.setdefault(spot, []).append(hs.project(f))
@@ -128,11 +128,10 @@ def st_section(stree):
     """
 
     class Section(object):
-        def __init__(self, node, niter):
+        def __init__(self, node):
             self.parent = node.parent
             self.dim = node.dim
             self.nodes = [node]
-            self._niter = niter
 
         def is_compatible(self, node):
             return self.parent == node.parent and self.dim.root == node.dim.root
@@ -149,19 +148,13 @@ def st_section(stree):
             elif not n.is_Iteration or n.dim.is_Time:
                 section = None
             elif section is None or not section.is_compatible(n):
-                niter=1
-                for c in n.visit():
-                    if c.is_Exprs:
-                        for e in c.exprs:
-                            niter = max(niter, e._niter)
-
-                section = Section(n, niter)
+                section = Section(n)
                 sections.append(section)
             else:
                 section.nodes.append(n)
 
     # Transform the schedule tree by adding in sections
     for i in sections:
-        insert(NodeSection(i._niter), i.parent, i.nodes)
+        insert(NodeSection(), i.parent, i.nodes)
 
     return stree

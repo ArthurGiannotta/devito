@@ -2,25 +2,27 @@ import weakref
 import abc
 import gc
 from collections import namedtuple
-from operator import mul
-from functools import reduce
 from ctypes import POINTER, Structure, byref
+from functools import reduce
+from math import ceil
+from operator import mul
 
 import numpy as np
 import sympy
+
 from sympy.core.cache import cacheit
 from cached_property import cached_property
 from cgen import Struct, Value
 
 from devito.data import default_allocator
+from devito.parameters import configuration
 from devito.symbolics import Add
 from devito.tools import (EnrichedTuple, Evaluable, Pickable,
                           ctypes_to_cstr, dtype_to_cstr, dtype_to_ctype)
-
 from devito.types.args import ArgProvider
 
-__all__ = ['Symbol', 'Scalar', 'Array', 'Indexed', 'Object', 'LocalObject',
-           'CompositeObject']
+__all__ = ['Symbol', 'Scalar', 'Array', 'Indexed', 'Object',
+           'LocalObject', 'CompositeObject']
 
 # This cache stores a reference to each created data object
 # so that we may re-create equivalent symbols during symbolic
@@ -526,10 +528,20 @@ class AbstractCachedFunction(AbstractFunction, Cached, Evaluable):
         return None
 
     def __halo_setup__(self, **kwargs):
-        return kwargs.get('halo', tuple((0, 0) for i in range(self.ndim)))
+        return tuple(kwargs.get('halo', [(0, 0) for i in range(self.ndim)]))
 
     def __padding_setup__(self, **kwargs):
-        return kwargs.get('padding', tuple((0, 0) for i in range(self.ndim)))
+        return tuple(kwargs.get('padding', [(0, 0) for i in range(self.ndim)]))
+
+    @cached_property
+    def _honors_autopadding(self):
+        """
+        True if the actual padding is greater or equal than whatever autopadding
+        would produce, False otherwise.
+        """
+        autopadding = self.__padding_setup__(autopadding=True)
+        return all(l0 >= l1 and r0 >= r1
+                   for (l0, r0), (l1, r1) in zip(self.padding, autopadding))
 
     @property
     def name(self):
@@ -807,6 +819,39 @@ class Array(AbstractCachedFunction):
             self._scope = kwargs.get('scope', 'heap')
             assert self._scope in ['heap', 'stack']
 
+    def __padding_setup__(self, **kwargs):
+        padding = kwargs.get('padding')
+        if padding is None:
+            padding = [(0, 0) for _ in range(self.ndim)]
+            if kwargs.get('autopadding', configuration['autopadding']):
+                # Heuristic 1; Arrays are typically introduced for DSE-produced
+                # temporaries, and are almost always used together with loop
+                # blocking.  Since the typical block size is a multiple of the SIMD
+                # vector length, `vl`, padding is made such that the NODOMAIN size
+                # is a multiple of `vl` too
+
+                # Heuristic 2: the right-NODOMAIN size is not only a multiple of
+                # `vl`, but also guaranteed to be *at least* greater or equal than
+                # `vl`, so that the compiler can tweak loop trip counts to maximize
+                # the effectiveness of SIMD vectorization
+
+                # Let UB be a function that rounds up a value `x` to the nearest
+                # multiple of the SIMD vector length
+                vl = configuration['platform'].simd_items_per_reg(self.dtype)
+                ub = lambda x: int(ceil(x / vl)) * vl
+
+                fvd_halo_size = sum(self.halo[-1])
+                fvd_pad_size = (ub(fvd_halo_size) - fvd_halo_size) + vl
+
+                padding[-1] = (0, fvd_pad_size)
+            return tuple(padding)
+        elif isinstance(padding, int):
+            return tuple((0, padding) for _ in range(self.ndim))
+        elif isinstance(padding, tuple) and len(padding) == self.ndim:
+            return tuple((0, i) if isinstance(i, int) else i for i in padding)
+        else:
+            raise TypeError("`padding` must be int or %d-tuple of ints" % self.ndim)
+
     @classmethod
     def __indices_setup__(cls, **kwargs):
         return tuple(kwargs['dimensions'])
@@ -834,6 +879,10 @@ class Array(AbstractCachedFunction):
     @property
     def _C_typename(self):
         return ctypes_to_cstr(POINTER(dtype_to_ctype(self.dtype)))
+
+    @property
+    def free_symbols(self):
+        return super().free_symbols - {d for d in self.dimensions if d.is_Default}
 
     def update(self, **kwargs):
         self._shape = kwargs.get('shape', self.shape)
@@ -892,6 +941,10 @@ class AbstractObject(Basic, sympy.Basic, Pickable):
     @property
     def _C_ctype(self):
         return self.dtype
+
+    @property
+    def function(self):
+        return self
 
     # Pickling support
     _pickle_args = ['name', 'dtype']

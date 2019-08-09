@@ -1,12 +1,17 @@
 from collections import namedtuple
 from itertools import product
 
+# Import the global `configuration` dict
+from devito.parameters import *  # noqa
+
 # API imports
 from devito.base import *  # noqa
 from devito.builtins import *  # noqa
 from devito.data.allocators import *  # noqa
 from devito.equation import *  # noqa
 from devito.finite_differences import *  # noqa
+from devito.implicit import * # noqa
+from devito.mpi import MPI  # noqa
 from devito.types import NODE, CELL, Buffer, SubDomain, SubDomainSet  # noqa
 from devito.types.dimension import *  # noqa
 
@@ -17,7 +22,6 @@ from devito.compiler import compiler_registry
 from devito.dle import dle_registry
 from devito.dse import dse_registry
 from devito.logger import error, warning, info, logger_registry, set_log_level  # noqa
-from devito.parameters import *  # noqa
 from devito.profiling import profiler_registry
 
 
@@ -50,6 +54,9 @@ configuration.add('log-level', 'INFO', list(logger_registry),
 # overwrite the user-modified files (thus entirely bypassing code generation),
 # and will instead use the custom kernel
 configuration.add('jit-backdoor', 0, [0, 1], lambda i: bool(i), False)
+
+# Enable/disable automatic padding for allocated data
+configuration.add('autopadding', False, [False, True])
 
 # Execution mode setup
 def _reinit_compiler(val):  # noqa
@@ -120,10 +127,3 @@ def mode_performance():
     # With the autotuner in `aggressive` mode, a more aggressive blocking strategy
     # which also tiles the innermost loop) is beneficial
     configuration['dle-options']['blockinner'] = True
-
-
-def mode_benchmark():
-    """Like ``mode_performance``, but also switch YASK's autotuner mode to
-    ``preemptive``."""
-    mode_performance()
-    configuration['autotuning'] = ['aggressive', 'preemptive']

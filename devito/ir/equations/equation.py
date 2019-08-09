@@ -17,7 +17,7 @@ class IREq(object):
     A mixin providing operations common to all :mod:`ir` equation types.
     """
 
-    _state = ('is_Increment', 'ispace', 'dspace', 'conditionals', 'implicit_dims', 'niter')
+    _state = ('is_Increment', 'ispace', 'dspace', 'conditionals', 'implicit_dims')
 
     @property
     def is_Scalar(self):
@@ -50,10 +50,6 @@ class IREq(object):
     @property
     def implicit_dims(self):
         return self._implicit_dims
-
-    @property
-    def niter(self):
-        return self._niter
 
     @property
     def conditionals(self):
@@ -165,7 +161,6 @@ class LoweredEq(sympy.Eq, IREq):
 
         expr._is_Increment = input_expr.is_Increment
         expr._implicit_dims = input_expr.implicit_dims
-        expr._niter = input_expr._niter
 
         return expr
 
@@ -212,15 +207,11 @@ class ClusterizedEq(sympy.Eq, IREq, FrozenExpr, Pickable):
             for i in cls._state:
                 v = kwargs[i] if i in kwargs else getattr(input_expr, i, None)
                 setattr(expr, '_%s' % i, v)
-        elif len(args) == 3:
-            # origin: ClusterizedEq(niter, lhs, rhs, **kwargs)
-            expr = sympy.Eq.__new__(cls, *args[1:], evaluate=False)
+        elif len(args) == 2:
+            # origin: ClusterizedEq(lhs, rhs, **kwargs)
+            expr = sympy.Eq.__new__(cls, *args, evaluate=False)
             for i in cls._state:
                 setattr(expr, '_%s' % i, kwargs.pop(i))
-            if args[0] is None:
-                expr._niter = 1
-            else:
-                expr._niter = args[0]
         else:
             raise ValueError("Cannot construct ClusterizedEq from args=%s "
                              "and kwargs=%s" % (str(args), str(kwargs)))
@@ -228,7 +219,7 @@ class ClusterizedEq(sympy.Eq, IREq, FrozenExpr, Pickable):
 
     def func(self, *args, **kwargs):
         kwargs = {k: kwargs.get(k, v) for k, v in self.state.items()}
-        return super(ClusterizedEq, self).func(self._niter, *args, **kwargs)
+        return super(ClusterizedEq, self).func(*args, **kwargs)
 
     # Pickling support
     _pickle_args = ['lhs', 'rhs']

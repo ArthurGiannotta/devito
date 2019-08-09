@@ -223,7 +223,7 @@ class TestArithmetic(object):
         assert np.allclose(fa.data[1, 1:-1, 1:-1], result[1:-1, 1:-1], rtol=1e-12)
 
     def test_indexed_w_indirections(self):
-        """Test point-wise arithmetic with indirectly indexed :class:`Function`s."""
+        """Test point-wise arithmetic with indirectly indexed Functions."""
         grid = Grid(shape=(10, 10))
         x, y = grid.dimensions
 
@@ -420,9 +420,6 @@ class TestAllocation(object):
         """
         grid = Grid(shape=tuple([11]*ndim))
         f = Function(name='f', grid=grid, staggered=stagg)
-        assert f.data.shape == tuple(11-i for i in f.staggered)
-        # Add a non-staggered field to ensure that the auto-derived
-        # dimension size arguments are at maximum
         g = Function(name='g', grid=grid)
         # Test insertion into a central point
         index = tuple(5 for _ in f.staggered)
@@ -443,9 +440,6 @@ class TestAllocation(object):
         """
         grid = Grid(shape=tuple([11]*ndim))
         f = TimeFunction(name='f', grid=grid, staggered=stagg)
-        assert f.data.shape[1:] == tuple(11-i for i in f.staggered[1:])
-        # Add a non-staggered field to ensure that the auto-derived
-        # dimension size arguments are at maximum
         g = TimeFunction(name='g', grid=grid)
         # Test insertion into a central point
         index = tuple([0] + [5 for _ in f.staggered[1:]])
@@ -469,7 +463,8 @@ class TestArguments(object):
         """
         for name, v in expected.items():
             if isinstance(v, (Function, SparseFunction)):
-                condition = (v._C_as_ndarray(arguments[name]) == v.data_with_halo).all()
+                condition = v._C_as_ndarray(arguments[name])[v._mask_domain] == v.data
+                condition = condition.all()
             else:
                 condition = arguments[name] == v
 
@@ -511,7 +506,7 @@ class TestArguments(object):
         }
         self.verify_arguments(op.arguments(time=4), expected)
         exp_parameters = ['f', 'g', 'x_m', 'x_M', 'y_m', 'y_M', 'z_m', 'z_M',
-                          'x0_blk_size', 'y0_blk_size', 'time_m', 'time_M']
+                          'x0_blk0_size', 'y0_blk0_size', 'time_m', 'time_M']
         self.verify_parameters(op.parameters, exp_parameters)
 
     def test_default_sparse_functions(self):
@@ -537,7 +532,7 @@ class TestArguments(object):
 
     def test_override_function_size(self):
         """
-        Test runtime size overrides for :class:`Function` dimensions.
+        Test runtime size overrides for Function dimensions.
 
         Note: The current behaviour for size-only arguments seems
         ambiguous (eg. op(x=3, y=4), as it sets `dim_size` as well as
@@ -546,7 +541,7 @@ class TestArguments(object):
         provided data. This should error out, or potentially we could
         set the corresponding size, while aliasing `dim` to `dim_e`?
 
-        The same should be tested for :class:`TimeFunction` once fixed.
+        The same should be tested for TimeFunction once fixed.
         """
         grid = Grid(shape=(5, 6, 7))
         g = Function(name='g', grid=grid)
@@ -570,7 +565,7 @@ class TestArguments(object):
 
     def test_override_function_subrange(self):
         """
-        Test runtime start/end override for :class:`Function` dimensions.
+        Test runtime start/end override for Function dimensions.
         """
         grid = Grid(shape=(5, 6, 7))
         g = Function(name='g', grid=grid)
@@ -594,7 +589,7 @@ class TestArguments(object):
 
     def test_override_timefunction_subrange(self):
         """
-        Test runtime start/end overrides for :class:`TimeFunction` dimensions.
+        Test runtime start/end overrides for TimeFunction dimensions.
         """
         grid = Grid(shape=(5, 6, 7))
         f = TimeFunction(name='f', grid=grid, time_order=0)
@@ -625,7 +620,7 @@ class TestArguments(object):
 
     def test_override_function_data(self):
         """
-        Test runtime data overrides for :class:`Function` symbols.
+        Test runtime data overrides for Function symbols.
         """
         grid = Grid(shape=(5, 6, 7))
         a = Function(name='a', grid=grid)
@@ -649,14 +644,14 @@ class TestArguments(object):
         assert (a2.data[:] == 6.).all()
 
         # Override with user-allocated numpy data
-        a3 = np.zeros_like(a.data_with_halo)
+        a3 = np.zeros_like(a._data_allocated)
         a3[:] = 4.
         op(a=a3)
         assert (a3[a._mask_domain] == 7.).all()
 
     def test_override_timefunction_data(self):
         """
-        Test runtime data overrides for :class:`TimeFunction` symbols.
+        Test runtime data overrides for TimeFunction symbols.
         """
         grid = Grid(shape=(5, 6, 7))
         a = TimeFunction(name='a', grid=grid, save=2)
@@ -682,7 +677,7 @@ class TestArguments(object):
         assert (a2.data[:] == 6.).all()
 
         # Override with user-allocated numpy data
-        a3 = np.zeros_like(a.data_with_halo)
+        a3 = np.zeros_like(a._data_allocated)
         a3[:] = 4.
         op(time_m=0, time=1, a=a3)
         assert (a3[a._mask_domain] == 7.).all()
@@ -820,7 +815,7 @@ class TestArguments(object):
         assert(op_arguments[time.max_name] == nt - 2)
 
     def test_derive_constant_value(self):
-        """Ensure that values for :class:`Constant` symbols are derived correctly."""
+        """Ensure that values for Constant symbols are derived correctly."""
         grid = Grid(shape=(5, 6))
         f = Function(name='f', grid=grid)
         a = Constant(name='a', value=3.)
@@ -1098,7 +1093,7 @@ class TestDeclarator(object):
   return 0;""" in str(operator.ccode)
 
 
-class TestLoopScheduler(object):
+class TestLoopScheduling(object):
 
     def test_consistency_coupled_wo_ofs(self, tu, tv, ti0, t0, t1):
         """
@@ -1154,65 +1149,108 @@ class TestLoopScheduler(object):
             exprs = FindNodes(Expression).visit(tree[-1])
             assert len(exprs) == 3
 
+    def test_fission_for_parallelism(self):
+        """
+        Test that expressions are scheduled to separate loops if this can
+        turn one sequential loop into two parallel loops ("loop fission").
+        """
+        grid = Grid(shape=(3, 3))
+        x, y = grid.dimensions
+
+        u = TimeFunction(name='u', grid=grid)
+        v = TimeFunction(name='v', grid=grid)
+
+        # Fission as an optimization to increase parallelism
+        eqns = [Eq(u, 1), Eq(v, u.dxl)]
+        op = Operator(eqns)
+        trees = retrieve_iteration_tree(op)
+        assert len(trees) == 2
+        assert trees[0][1].dim is x
+        assert trees[1][1].dim is x
+
+        # Same story as above, but now with a WAR
+        eqns = [Eq(u, 1), Eq(v, u.dxr)]
+        op = Operator(eqns)
+        trees = retrieve_iteration_tree(op)
+        assert len(trees) == 2
+        assert trees[0][1].dim is x
+        assert trees[1][1].dim is x
+
+        # Again pretty similar, but with a WAR on `v` -- fission is still
+        # the result of optimization
+        eqns = [Eq(u, v), Eq(v, u.dxl)]
+        op = Operator(eqns)
+        trees = retrieve_iteration_tree(op)
+        assert len(trees) == 2
+        assert trees[0][1].dim is x
+        assert trees[1][1].dim is x
+
+        # No fission expected
+        eqns = [Eq(u.forward, v), Eq(v, u.dxl)]
+        op = Operator(eqns)
+        trees = retrieve_iteration_tree(op)
+        assert len(trees) == 1
+
     @pytest.mark.parametrize('exprs,directions,expected,visit', [
-        # WAR 2->3; expected=2
+        # WAR 2->3
         (('Eq(ti0[x,y,z], ti0[x,y,z] + ti1[x,y,z])',
           'Eq(ti1[x,y,z], ti3[x,y,z])',
           'Eq(ti3[x,y,z], ti1[x,y,z+1] + 1.)'),
-         '++-', ['xyz'], 'xyz'),
-        # WAR 1->2, 2->3; expected=2
-        # The second WAR forces a change of iteration direction along z
+         '++++', ['xyz', 'xyz'], 'xyzz'),
+        # WAR 1->2, 2->3
         (('Eq(ti0[x,y,z], ti0[x,y,z] + ti1[x,y,z])',
           'Eq(ti1[x,y,z], ti0[x,y,z+1])',
           'Eq(ti3[x,y,z], ti1[x,y,z-2] + 1.)'),
-         '++-+', ['xyz', 'xyz'], 'xyzz'),
+         '+++++', ['xyz', 'xyz', 'xyz'], 'xyzzz'),
         # WAR 1->2, 2->3, RAW 2->3
-        # In 2->3 there are both a RAW and a WAR, so the compiler enforces a
-        # change of iteration direction. 1->2 caused --, so 2->3 gets ++
         (('Eq(ti0[x,y,z], ti0[x,y,z] + ti1[x,y,z])',
           'Eq(ti1[x,y,z], ti0[x,y,z+1])',
           'Eq(ti3[x,y,z], ti1[x,y,z-2] + ti1[x,y,z+2])'),
-         '++-+', ['xyz', 'xyz'], 'xyzz'),
-        # WAR 1->3; expected=1
+         '+++++', ['xyz', 'xyz', 'xyz'], 'xyzzz'),
+        # WAR 1->3
         (('Eq(ti0[x,y,z], ti0[x,y,z] + ti1[x,y,z])',
           'Eq(ti1[x,y,z], ti3[x,y,z])',
           'Eq(ti3[x,y,z], ti0[x,y,z+1] + 1.)'),
-         '++-', ['xyz'], 'xyz'),
-        # WAR 1->2, 2->3; WAW 1->3; expected=2
-        # ti0 is an Array, so the observation made above still holds (expected=2
-        # rather than 3)
+         '++++', ['xyz', 'xyz'], 'xyzz'),
+        # WAR 1->3
+        # Like before, but the WAR is along `y`, an inner Dimension
         (('Eq(ti0[x,y,z], ti0[x,y,z] + ti1[x,y,z])',
-          'Eq(ti1[x,y,z], 3*ti0[x,y,z+2])',
+          'Eq(ti1[x,y,z], ti3[x,y,z])',
+          'Eq(ti3[x,y,z], ti0[x,y+1,z] + 1.)'),
+         '+++++', ['xyz', 'xyz'], 'xyzyz'),
+        # WAR 1->2, 2->3; WAW 1->3
+        # Similar to the cases above, but the last equation does not iterate over `z`
+        (('Eq(ti0[x,y,z], ti0[x,y,z] + ti1[x,y,z])',
+          'Eq(ti1[x,y,z], ti0[x,y,z+2])',
           'Eq(ti0[x,y,0], ti0[x,y,0] + 1.)'),
-         '++-', ['xyz', 'xy'], 'xyz'),
-        # WAR 1->2; WAW 1->3; expected=2
-        # Now tu, tv, tw are not Arrays, so they must end up in separate loops
+         '++++', ['xyz', 'xyz', 'xy'], 'xyzz'),
+        # WAR 1->2; WAW 1->3
+        # Basically like above, but with the time dimension. This should have no impact
         (('Eq(tu[t,x,y,z], tu[t,x,y,z] + tv[t,x,y,z])',
           'Eq(tv[t,x,y,z], tu[t,x,y,z+2])',
           'Eq(tu[t,x,y,0], tu[t,x,y,0] + 1.)'),
-         '+++-', ['txyz', 'txy'], 'txyz'),
-        # WAR 1->2, 2->3; expected=2
-        # The second WAR forces a change of iteration direction along z
+         '+++++', ['txyz', 'txyz', 'txy'], 'txyzz'),
+        # WAR 1->2, 2->3
         (('Eq(tu[t,x,y,z], tu[t,x,y,z] + tv[t,x,y,z])',
           'Eq(tv[t,x,y,z], tu[t,x,y,z+2])',
           'Eq(tw[t,x,y,z], tv[t,x,y,z-1] + 1.)'),
-         '+++-+', ['txyz', 'txyz'], 'txyzz'),
-        # WAR 1->2; WAW 1->3; expected=2
+         '++++++', ['txyz', 'txyz', 'txyz'], 'txyzzz'),
+        # WAR 1->2; WAW 1->3
         (('Eq(tu[t,x,y,z], tu[t,x,y,z] + tv[t,x,y,z])',
           'Eq(tv[t,x,y,z], tu[t,x+2,y,z])',
           'Eq(tu[t,3,y,0], tu[t,3,y,0] + 1.)'),
-         '+-+++', ['txyz', 'ty'], 'txyzy'),
-        # RAW 1->2, WAR 2->3; expected=1
+         '++++++++', ['txyz', 'txyz', 'ty'], 'txyzxyzy'),
+        # RAW 1->2, WAR 2->3
         (('Eq(tu[t,x,y,z], tu[t,x,y,z] + tv[t,x,y,z])',
           'Eq(tv[t,x,y,z], tu[t,x,y,z-2])',
           'Eq(tw[t,x,y,z], tv[t,x,y+1,z] + 1.)'),
-         '++-+', ['txyz'], 'txyz'),
-        # WAR 1->2; WAW 1->3; expected=2
+         '+++++++', ['txyz', 'txyz', 'txyz'], 'txyzzyz'),
+        # WAR 1->2; WAW 1->3
         (('Eq(tu[t-1,x,y,z], tu[t,x,y,z] + tv[t,x,y,z])',
           'Eq(tv[t,x,y,z], tu[t,x,y,z+2])',
           'Eq(tu[t-1,x,y,0], tu[t,x,y,0] + 1.)'),
          '-+++', ['txyz', 'txy'], 'txyz'),
-        # WAR 1->2; expected=1
+        # WAR 1->2
         (('Eq(tu[t-1,x,y,z], tu[t,x,y,z] + tv[t,x,y,z])',
           'Eq(tv[t,x,y,z], tu[t,x,y,z+2] + tu[t,x,y,z-2])',
           'Eq(tw[t,x,y,z], tv[t,x,y,z] + 2)'),
@@ -1233,7 +1271,7 @@ class TestLoopScheduler(object):
           'Eq(tu[t-1,x,y,z], tu[t,x+3,y,z] + tv[t,x,y,z])',
           'Eq(tw[t-1,x,y,z], tu[t,x,y+1,z] + ti0[x,y-1,z])'),
          '+++-+++', ['xyz', 'txyz'], 'xyztxyz'),
-        # War 2->1; expected=2
+        # WAR 2->1
         # Here the difference is that we're using SubDimensions
         (('Eq(tv[t,xi,yi,zi], tu[t,xi-1,yi,zi] + tu[t,xi+1,yi,zi])',
           'Eq(tu[t+1,xi,yi,zi], tu[t,xi,yi,zi] + tv[t,xi-1,yi,zi] + tv[t,xi+1,yi,zi])'),
@@ -1371,8 +1409,8 @@ class TestLoopScheduler(object):
         Test that equations using a mixture of Function and TimeFunction objects
         are embedded within the same time loop.
         """
-        grid = Grid(shape=shape, dimensions=dimensions, time_dimension=time,
-                    dtype=np.float64)
+        grid = Grid(shape=shape, dimensions=dimensions, dtype=np.float64)
+        time = grid.time_dim
         a = TimeFunction(name='a', grid=grid, time_order=2, space_order=2)
         p_aux = Dimension(name='p_aux')
         b = Function(name='b', shape=shape + (10,), dimensions=dimensions + (p_aux,),

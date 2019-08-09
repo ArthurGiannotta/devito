@@ -9,6 +9,7 @@ from devito.tools import Evaluable, as_tuple
 
 __all__ = ['Eq', 'Inc', 'solve', 'collect']
 
+
 class Eq(sympy.Eq, Evaluable):
 
     """
@@ -58,14 +59,13 @@ class Eq(sympy.Eq, Evaluable):
 
     is_Increment = False
 
-    def __new__(cls, lhs, rhs=0, subdomain=None, coefficients=None, implicit_dims=None, niter=1,
+    def __new__(cls, lhs, rhs=0, subdomain=None, coefficients=None, implicit_dims=None,
                 **kwargs):
         kwargs['evaluate'] = False
         obj = sympy.Eq.__new__(cls, lhs, rhs, **kwargs)
         obj._subdomain = subdomain
         obj._substitutions = coefficients
         obj._implicit_dims = as_tuple(implicit_dims)
-        obj._niter = niter
 
         return obj
 
@@ -77,8 +77,7 @@ class Eq(sympy.Eq, Evaluable):
     @cached_property
     def evaluate(self):
         eq = self.func(*self._evaluate_args(), subdomain=self.subdomain,
-                       coefficients=self.substitutions, implicit_dims=self._implicit_dims,
-                       niter=self._niter)
+                       coefficients=self.substitutions, implicit_dims=self._implicit_dims)
         if eq._uses_symbolic_coefficients:
             # NOTE: As Coefficients.py is expanded we will not want
             # all rules to be expunged during this procress.
@@ -122,8 +121,7 @@ class Eq(sympy.Eq, Evaluable):
 
     def xreplace(self, rules):
         return self.func(self.lhs.xreplace(rules), rhs=self.rhs.xreplace(rules),
-                         subdomain=self._subdomain, implicit_dims=self._implicit_dims,
-                         niter=self._niter)
+                         subdomain=self._subdomain, implicit_dims=self._implicit_dims)
 
     def __str__(self):
         return "%s(%s, %s)" % (self.__class__.__name__, self.lhs, self.rhs)
@@ -207,7 +205,6 @@ def solve(eq, target, **kwargs):
         eq = eq.lhs - eq.rhs
     return sympy.solve(eq.evaluate, target.evaluate, **kwargs)[0]
 
-
 def collect(eq, targets):
     """
     Algebraically collect terms of an Eq w.r.t. given symbols.
@@ -215,14 +212,15 @@ def collect(eq, targets):
     Parameters
     ----------
     eq : expr-like
-        The equation to be rearranged.
+        The equation to have its terms collected.
     targets : list of symbols
-        The symbols w.r.t. which the equation is rearranged. May be a `Function`
+        The symbols w.r.t. which the equation is rearranged. May be an array of `Function`
         or any other symbolic object.
     """
     if isinstance(eq, Eq):
         eq = eq.lhs - eq.rhs
 
+    # Make a polynomial of the terms to be collected then find its coefficients
     coeffs = sympy.poly(sympy.expand(eq.evaluate), targets).coeffs()
 
     rhs = -coeffs[-1]

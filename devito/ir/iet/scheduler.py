@@ -56,7 +56,7 @@ def iet_make(stree):
                              direction=i.direction, uindices=uindices)
 
         elif i.is_Section:
-            body = Section('section%d' % nsections, body=queues.pop(i), niter=i._niter)
+            body = Section('section%d' % nsections, body=queues.pop(i))
             nsections += 1
 
         elif i.is_Halo:
@@ -147,7 +147,7 @@ def iet_insert_decls(iet, external):
     allocator = Allocator()
     for k, v in MapSections().visit(iet).items():
         if k.is_Expression:
-            if k.is_scalar_assign:
+            if k.is_definition:
                 # On the stack
                 site = v if v else iet
                 allocator.push_scalar_on_stack(site[-1], k)

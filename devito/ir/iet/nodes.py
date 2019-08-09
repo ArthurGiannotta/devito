@@ -4,16 +4,17 @@ import abc
 import inspect
 import numbers
 from cached_property import cached_property
-from collections import Iterable, OrderedDict, namedtuple
+from collections import OrderedDict, namedtuple
+from collections.abc import Iterable
 
 import cgen as c
 
 from devito.data import FULL
 from devito.ir.equations import ClusterizedEq
 from devito.ir.iet import (IterationProperty, SEQUENTIAL, PARALLEL, PARALLEL_IF_ATOMIC,
-                           VECTOR, WRAPPABLE, AFFINE, USELESS, OVERLAPPABLE)
+                           VECTOR, WRAPPABLE, ROUNDABLE, AFFINE, OVERLAPPABLE)
 from devito.ir.support import Forward, detect_io
-from devito.symbolics import FunctionFromPointer, as_symbol, ccode
+from devito.symbolics import ListInitializer, FunctionFromPointer, as_symbol, ccode
 from devito.tools import (Signer, as_tuple, filter_ordered, filter_sorted, flatten,
                           validate_type, dtype_to_cstr)
 from devito.types import Symbol, Indexed
@@ -212,6 +213,10 @@ class Call(Simple, Node):
     def functions(self):
         return tuple(i for i in self.arguments if isinstance(i, AbstractFunction))
 
+    @property
+    def children(self):
+        return tuple(i for i in self.arguments if isinstance(i, Call))
+
     @cached_property
     def free_symbols(self):
         free = set()
@@ -288,13 +293,16 @@ class Expression(Simple, Node):
         return not self.is_scalar
 
     @property
-    def is_scalar_assign(self):
-        """True if a scalar, non-increment expression."""
-        return self.is_scalar and not self.is_Increment
+    def is_definition(self):
+        """
+        True if it is an assignment, False otherwise
+        """
+        return ((self.is_scalar and not self.is_Increment) or
+                (self.is_tensor and isinstance(self.expr.rhs, ListInitializer)))
 
     @property
     def defines(self):
-        return (self.write,) if self.is_scalar else ()
+        return (self.write,) if self.is_definition else ()
 
     @property
     def free_symbols(self):
@@ -416,6 +424,10 @@ class Iteration(Node):
     @property
     def is_Wrappable(self):
         return WRAPPABLE in self.properties
+
+    @property
+    def is_Roundable(self):
+        return ROUNDABLE in self.properties
 
     @property
     def ncollapsed(self):
@@ -745,10 +757,9 @@ class Section(List):
 
     is_Sequence = True
 
-    def __init__(self, name, body=None, niter=1):
+    def __init__(self, name, body=None):
         super(Section, self).__init__(body=body)
         self.name = name
-        self._niter = niter
 
     def __repr__(self):
         return "<Section (%d)>" % len(self.body)
@@ -885,8 +896,11 @@ class HaloSpot(Node):
         return ()
 
     @property
-    def is_Useless(self):
-        return USELESS in self.properties
+    def useless(self):
+        for i in self.properties:
+            if i.name == 'useless':
+                return i.val
+        return ()
 
     @property
     def is_Overlappable(self):

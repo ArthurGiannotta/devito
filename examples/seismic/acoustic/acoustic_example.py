@@ -2,7 +2,7 @@ import numpy as np
 from argparse import ArgumentParser
 
 from devito.logger import info
-from devito import Constant, Function, smooth
+from devito import Constant, Function, smooth, configuration
 from examples.seismic.acoustic import AcousticWaveSolver
 from examples.seismic import demo_model, AcquisitionGeometry
 
@@ -52,18 +52,18 @@ def run(shape=(50, 50, 50), spacing=(20.0, 20.0, 20.0), tn=1000.0,
 
     if preset == 'constant':
         # With  a new m as Constant
-        m0 = Constant(name="m", value=.25, dtype=np.float32)
-        solver.forward(save=save, m=m0)
-        # With a new m as a scalar value
-        solver.forward(save=save, m=.25)
+        v0 = Constant(name="v", value=2.0, dtype=np.float32)
+        solver.forward(save=save, vp=v0)
+        # With a new vp as a scalar value
+        solver.forward(save=save, vp=2.0)
 
     if not full_run:
         return summary.gflopss, summary.oi, summary.timings, [rec, u.data]
 
     # Smooth velocity
     initial_vp = Function(name='v0', grid=solver.model.grid, space_order=space_order)
-    smooth(initial_vp, solver.model.m)
-    dm = np.float32(initial_vp.data**2 - solver.model.m.data)
+    smooth(initial_vp, solver.model.vp)
+    dm = np.float32(initial_vp.data**(-2) - solver.model.vp.data**(-2))
 
     info("Applying Adjoint")
     solver.adjoint(rec, autotune=autotune)
@@ -80,8 +80,9 @@ if __name__ == "__main__":
                         help="Preset to determine the number of dimensions")
     parser.add_argument('-f', '--full', default=False, action='store_true',
                         help="Execute all operators and store forward wavefield")
-    parser.add_argument('-a', '--autotune', default=False, action='store_true',
-                        help="Enable autotuning for block sizes")
+    parser.add_argument('-a', '--autotune', default='off',
+                        choices=(configuration._accepted['autotuning']),
+                        help="Operator auto-tuning mode")
     parser.add_argument("-so", "--space_order", default=6,
                         type=int, help="Space order of the simulation")
     parser.add_argument("--nbpml", default=40,

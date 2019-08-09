@@ -1,7 +1,7 @@
 from devito.tools import memoized_meth
 from examples.seismic import Receiver
-from examples.seismic.elastic.operators import (ForwardOperator, stress_fields,
-                                                particle_velocity_fields)
+from examples.seismic.elastic.operators import (ForwardOperator, tensor_function,
+                                                vector_function)
 
 
 class ElasticWaveSolver(object):
@@ -89,8 +89,9 @@ class ElasticWaveSolver(object):
 
         # Create all the fields vx, vz, tau_xx, tau_zz, tau_xz
         save_t = src.nt if save else None
-        vx, vy, vz = particle_velocity_fields(self.model, save_t, self.space_order)
-        txx, tyy, tzz, txy, txz, tyz = stress_fields(self.model, save_t, self.space_order)
+        vx, vy, vz = vector_function('v', self.model, save_t, self.space_order)
+        txx, tyy, tzz, txy, txz, tyz = tensor_function('t', self.model, save_t,
+                                                       self.space_order)
         kwargs['vx'] = vx
         kwargs['vz'] = vz
         kwargs['txx'] = txx
@@ -101,7 +102,7 @@ class ElasticWaveSolver(object):
             kwargs['tyy'] = tyy
             kwargs['txy'] = txy
             kwargs['tyz'] = tyz
-        # Pick m from model unless explicitly provided
+        # Pick physical parameters from model unless explicitly provided
         vp = vp or self.model.vp
         vs = vs or self.model.vs
         rho = rho or self.model.rho

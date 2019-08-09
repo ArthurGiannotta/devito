@@ -4,7 +4,8 @@ Visitor hierarchy to inspect and/or create IETs.
 The main Visitor class is adapted from https://github.com/coneoproject/COFFEE.
 """
 
-from collections import Iterable, OrderedDict
+from collections import OrderedDict
+from collections.abc import Iterable
 from operator import attrgetter
 
 import cgen as c
@@ -13,7 +14,7 @@ from devito.exceptions import VisitorException
 from devito.ir.iet.nodes import Node, Iteration, Expression, Call
 from devito.ir.support.space import Backward
 from devito.symbolics import ccode
-from devito.tools import GenericVisitor, as_tuple, filter_sorted, flatten, dtype_to_cstr
+from devito.tools import GenericVisitor, as_tuple, filter_sorted, flatten
 
 
 __all__ = ['FindNodes', 'FindSections', 'FindSymbols', 'MapSections', 'MapNodes',
@@ -166,7 +167,9 @@ class CGen(Visitor):
         ret = []
         for i in args:
             try:
-                if i.is_LocalObject:
+                if isinstance(i, Call):
+                    ret.append(self.visit(i).text)
+                elif i.is_LocalObject:
                     ret.append('&%s' % i._C_name)
                 elif i.is_Array:
                     ret.append("(%s)%s" % (i._C_typename, i.name))
@@ -205,13 +208,6 @@ class CGen(Visitor):
     def visit_Section(self, o):
         header = c.Comment("Begin %s" % o.name)
         body = flatten(self._visit(i) for i in o.children)
-        if o._niter != 1:
-            loop_init = 'unsigned int iter_i = 0'
-            loop_cond = 'iter_i < %s' % (str(o._niter))
-            loop_inc = '++iter_i'
-            
-            body = [c.For(loop_init, loop_cond, loop_inc, c.Block(body))]
-
         footer = c.Comment("End %s" % o.name)
         return c.Module([header] + body + [footer])
 
@@ -227,8 +223,15 @@ class CGen(Visitor):
                                          ccode(o.expr.rhs, dtype=o.dtype)))
 
     def visit_LocalExpression(self, o):
-        return c.Initializer(c.Value(dtype_to_cstr(o.dtype),
-                             ccode(o.expr.lhs, dtype=o.dtype)),
+        if o.write.is_Array:
+            lhs = '%s%s' % (
+                o.expr.lhs.name,
+                ''.join(['[%s]' % d.symbolic_size for d in o.expr.lhs.dimensions])
+            )
+        else:
+            lhs = ccode(o.expr.lhs, dtype=o.dtype)
+
+        return c.Initializer(c.Value(o.expr.lhs._C_typename, lhs),
                              ccode(o.expr.rhs, dtype=o.dtype))
 
     def visit_ForeignExpression(self, o):
@@ -236,7 +239,8 @@ class CGen(Visitor):
 
     def visit_Call(self, o):
         arguments = self._args_call(o.arguments)
-        return c.Statement('%s(%s)' % (o.name, ','.join(arguments)))
+        code = '%s(%s)' % (o.name, ','.join(arguments))
+        return c.Statement(code)
 
     def visit_Conditional(self, o):
         then_body = c.Block(self._visit(o.then_body))
@@ -499,7 +503,7 @@ class FindSymbols(Visitor):
     ----------
     mode : str, optional
         Drive the search. Accepted:
-        - ``symbolics``: Collect :class:`AbstractSymbol` objects, default.
+        - ``symbolics``: Collect AbstractSymbol objects, default.
         - ``free-symbols``: Collect all free symbols.
         - ``defines``: Collect all defined (bound) objects.
     """
@@ -531,8 +535,12 @@ class FindSymbols(Visitor):
     def visit_Expression(self, o):
         return filter_sorted([f for f in self.rule(o)], key=attrgetter('name'))
 
+    def visit_Call(self, o):
+        symbols = self._visit(o.children)
+        symbols.extend([f for f in self.rule(o)])
+        return filter_sorted(symbols, key=attrgetter('name'))
+
     visit_ArrayCast = visit_Expression
-    visit_Call = visit_Expression
 
 
 class FindNodes(Visitor):
@@ -640,7 +648,7 @@ class FindAdjacent(Visitor):
 class IsPerfectIteration(Visitor):
 
     """
-    Return True if an :class:`Iteration` defines a perfect loop nest, False otherwise.
+    Return True if an Iteration defines a perfect loop nest, False otherwise.
     """
 
     def visit_object(self, o, **kwargs):
@@ -726,7 +734,7 @@ class Transformer(Visitor):
 
 class XSubs(Transformer):
     """
-    :class:`Transformer` that performs substitutions on :class:`Expression`s
+    Transformer that performs substitutions on Expressions
     in a given tree, akin to SymPy's ``subs``.
 
     Parameters
