@@ -1,9 +1,8 @@
-from devito.equation import Eq
+from devito.equation import Eq, collect, solve
 from devito.types import Dimension, TimeFunction
 from enum import Enum, auto
-from sympy import solve
 
-__all__ = ['IterativeMethod']
+__all__ = ['IterativeMethod', 'collect_forward']
 
 def static_vars(**kwargs):
     def decorate(func):
@@ -56,8 +55,7 @@ class IterativeMethod(Enum):
             IterativeMethod.explicit_expressions.temporaries += [temp]
 
             temp_subs = temp.subs(temp_to_orig_subs)
-            gauss_seidel = solve((equation.lhs - temp_subs).evaluate, function.forward,
-                                rational = False, simplify = False)[0]
+            gauss_seidel = solve(equation.lhs - temp_subs, function.forward)
 
         if self.value == self.GAUSS_SEIDEL.value:
             # This expression calculates the b coefficients
@@ -82,6 +80,32 @@ class IterativeMethod(Enum):
             return [expr1, expr2]
 
         return []
+
+def get_functions(args):
+    terms = []
+
+    for arg in args:
+        if arg.is_Function:
+            terms += [arg]
+        else:
+            terms += get_functions(arg.args)
+
+    return terms
+
+def collect_forward(eq):
+    func = next(iter(getattr(eq.lhs, "_functions", frozenset()).union(getattr(eq.rhs, "_functions", frozenset()))))
+    functions = get_functions(eq.evaluate.args)
+
+    time_dimension = func.forward.dimensions[func._time_position]
+    forward_dimension = time_dimension + time_dimension.spacing
+
+    forward_terms = []
+    for function in functions:
+        if function.args[func._time_position] == forward_dimension:
+            if not function in forward_terms:
+                forward_terms += [function]
+
+    return collect(eq, forward_terms)
 
 #class IterativeFunction(Function):
 #    """"""
