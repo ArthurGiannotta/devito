@@ -174,13 +174,20 @@ def guard(clusters):
 
             # Create a guarded Cluster
             guards = {}
+            brk_guards = {}
             for cd in cds:
-                condition = guards.setdefault(cd.parent, [])
+                if cd.brk:
+                    guards.setdefault(cd.parent, [])
+                    condition = brk_guards.setdefault(cd.parent, [])
+                else:
+                    condition = guards.setdefault(cd.parent, [])
+                    brk_guards.setdefault(cd.parent, [])
                 if cd.condition is None:
                     condition.append(CondEq(cd.parent % cd.factor, 0))
                 else:
                     condition.append(lower_exprs(cd.condition))
-            guards = {k: sympy.And(*v, evaluate=False) for k, v in guards.items()}
+            guards = {k: [sympy.And(*brk_guards[k], evaluate=False),
+                          sympy.And(*v, evaluate=False)] for k, v in guards.items()}
             processed.append(c.rebuild(exprs=list(g), guards=guards))
 
     return ClusterGroup(processed)
