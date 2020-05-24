@@ -78,6 +78,8 @@ def build_iterators(mapper):
     """
     iterators = OrderedDict()
     for k, v in mapper.items():
+        if k is None:
+            continue
         for d, offs in v.items():
             if d.is_Stepping:
                 sub_iterators = iterators.setdefault(d.parent, set())
