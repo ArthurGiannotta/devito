@@ -22,7 +22,8 @@ from devito.types.basic import AbstractFunction
 __all__ = ['Node', 'Block', 'Expression', 'Element', 'Callable', 'Call', 'Conditional',
            'Iteration', 'List', 'LocalExpression', 'Section', 'TimedList', 'Prodder',
            'MetaCall', 'ArrayCast', 'ForeignExpression', 'HaloSpot', 'IterationTree',
-           'ExpressionBundle', 'AugmentedExpression', 'Increment', 'Return', 'While']
+           'ExpressionBundle', 'AugmentedExpression', 'Increment', 'Return', 'While',
+           'Break']
 
 # First-class IET nodes
 
@@ -48,6 +49,7 @@ class Node(Signer):
     is_Section = False
     is_HaloSpot = False
     is_ExpressionBundle = False
+    is_Break = False
 
     _traversable = []
     """
@@ -645,6 +647,13 @@ class Conditional(Node):
     @property
     def defines(self):
         return ()
+
+
+class Break(Node):
+
+    """A node representing a break statement"""
+
+    is_Break = True
 
 
 # Second level IET nodes
